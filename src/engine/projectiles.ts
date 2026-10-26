@@ -26,6 +26,7 @@ export class ProjectileManager {
   public projectiles: Projectile[] = [];
   public solidTrailsGroup: THREE.Group;
   private projectileGeo: THREE.SphereGeometry;
+  private solidConstructs: { mesh: THREE.Mesh; life: number; maxLife: number }[] = [];
 
   constructor() {
     this.group = new THREE.Group();
@@ -68,6 +69,19 @@ export class ProjectileManager {
   }
 
   public update(dt: number, timeDilationFactor: number = 1.0): void {
+    // Tick solid light constructs
+    for (let i = this.solidConstructs.length - 1; i >= 0; i--) {
+      const c = this.solidConstructs[i];
+      c.life += dt;
+      (c.mesh.material as THREE.MeshStandardMaterial).opacity = Math.max(0, 0.85 * (1 - c.life / c.maxLife));
+      if (c.life >= c.maxLife) {
+        this.solidTrailsGroup.remove(c.mesh);
+        c.mesh.geometry.dispose();
+        (c.mesh.material as THREE.Material).dispose();
+        this.solidConstructs.splice(i, 1);
+      }
+    }
+
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
 
@@ -137,13 +151,7 @@ export class ProjectileManager {
     });
     const tube = new THREE.Mesh(tubeGeo, tubeMat);
     this.solidTrailsGroup.add(tube);
-
-    // Auto-dissipate solid construct after 8 seconds
-    setTimeout(() => {
-      this.solidTrailsGroup.remove(tube);
-      tubeGeo.dispose();
-      tubeMat.dispose();
-    }, 8000);
+    this.solidConstructs.push({ mesh: tube, life: 0, maxLife: 8.0 });
   }
 
   public destroyProjectile(index: number): void {

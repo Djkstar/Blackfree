@@ -13,12 +13,12 @@ export class InputManager {
   public mouseButtons: Map<number, boolean> = new Map();
   public justPressedMouse: Set<number> = new Set();
 
-  public mouseDeltaX: number = 0;
-  public mouseDeltaY: number = 0;
+  // Accumulated deltas — consumed each frame by reading via update()
+  private accMouseDeltaX: number = 0;
+  private accMouseDeltaY: number = 0;
   public wheelDelta: number = 0;
   public isPointerLocked: boolean = false;
 
-  // Drag-to-look tracking (Right mouse button or left button without firing if dragging)
   public isDraggingLook: boolean = false;
   private lastDragX: number = 0;
   private lastDragY: number = 0;
@@ -77,7 +77,7 @@ export class InputManager {
   }
 
   private handleContextMenu(e: MouseEvent): void {
-    e.preventDefault(); // Prevent right-click context menu in game viewport
+    e.preventDefault();
   }
 
   public requestPointerLock(): void {
@@ -85,12 +85,10 @@ export class InputManager {
       try {
         const promise = this.targetDomElement.requestPointerLock() as unknown as Promise<void> | undefined;
         if (promise && typeof promise.catch === 'function') {
-          promise.catch(() => {
-            // Pointerlock denied or restricted; fallback drag/arrow modes active
-          });
+          promise.catch(() => {});
         }
       } catch {
-        // Fallback
+        // Fallback to drag mode
       }
     }
   }
@@ -119,11 +117,9 @@ export class InputManager {
 
   private handleMouseDown(e: MouseEvent): void {
     if (!this.isPointerLocked) {
-      // Attempt pointer lock on any click
       this.requestPointerLock();
     }
 
-    // Always record drag start coordinates for seamless turning
     this.isDraggingLook = true;
     this.lastDragX = e.clientX;
     this.lastDragY = e.clientY;
@@ -141,14 +137,13 @@ export class InputManager {
 
   private handleMouseMove(e: MouseEvent): void {
     if (this.isPointerLocked) {
-      this.mouseDeltaX += e.movementX;
-      this.mouseDeltaY += e.movementY;
+      this.accMouseDeltaX += e.movementX;
+      this.accMouseDeltaY += e.movementY;
     } else if (this.isDraggingLook) {
-      // High-precision smooth drag turning
       const dx = e.clientX - this.lastDragX;
       const dy = e.clientY - this.lastDragY;
-      this.mouseDeltaX += dx * 1.8;
-      this.mouseDeltaY += dy * 1.8;
+      this.accMouseDeltaX += dx * 1.8;
+      this.accMouseDeltaY += dy * 1.8;
       this.lastDragX = e.clientX;
       this.lastDragY = e.clientY;
     }
@@ -166,8 +161,8 @@ export class InputManager {
     if (this.isDraggingLook && e.touches.length > 0) {
       const dx = e.touches[0].clientX - this.lastDragX;
       const dy = e.touches[0].clientY - this.lastDragY;
-      this.mouseDeltaX += dx * 2.2;
-      this.mouseDeltaY += dy * 2.2;
+      this.accMouseDeltaX += dx * 2.2;
+      this.accMouseDeltaY += dy * 2.2;
       this.lastDragX = e.touches[0].clientX;
       this.lastDragY = e.touches[0].clientY;
       e.preventDefault();
@@ -191,8 +186,8 @@ export class InputManager {
     this.justPressedKeys.clear();
     this.mouseButtons.clear();
     this.justPressedMouse.clear();
-    this.mouseDeltaX = 0;
-    this.mouseDeltaY = 0;
+    this.accMouseDeltaX = 0;
+    this.accMouseDeltaY = 0;
     this.isDraggingLook = false;
   }
 
@@ -230,32 +225,37 @@ export class InputManager {
     return this.coyoteTime > 0;
   }
 
+  /**
+   * Called once per frame. Returns the accumulated mouse/keyboard delta for
+   * this frame and resets state. The returned dx/dy are what PlayerController
+   * must use — never read accMouseDeltaX/Y directly from outside.
+   */
   public update(dt: number): { dx: number; dy: number; wheel: number } {
-    // Fast, responsive keyboard turning (Arrow keys & IJKL)
-    // 2400 units/sec gives snappy ~180° turns in under 0.4s
+    // Keyboard turning — writes into the accumulated delta before we return it
     const turnSpeed = 2200 * dt;
 
     if (this.isHeld('ArrowLeft') || this.isHeld('KeyJ')) {
-      this.mouseDeltaX -= turnSpeed;
+      this.accMouseDeltaX -= turnSpeed;
     }
     if (this.isHeld('ArrowRight') || this.isHeld('KeyL')) {
-      this.mouseDeltaX += turnSpeed;
+      this.accMouseDeltaX += turnSpeed;
     }
     if (this.isHeld('ArrowUp') || this.isHeld('KeyI')) {
-      this.mouseDeltaY -= turnSpeed;
+      this.accMouseDeltaY -= turnSpeed;
     }
     if (this.isHeld('ArrowDown') || this.isHeld('KeyK')) {
-      this.mouseDeltaY += turnSpeed;
+      this.accMouseDeltaY += turnSpeed;
     }
 
     const delta = {
-      dx: this.mouseDeltaX,
-      dy: this.mouseDeltaY,
+      dx: this.accMouseDeltaX,
+      dy: this.accMouseDeltaY,
       wheel: this.wheelDelta,
     };
 
-    this.mouseDeltaX = 0;
-    this.mouseDeltaY = 0;
+    // Clear accumulators AFTER we've captured them
+    this.accMouseDeltaX = 0;
+    this.accMouseDeltaY = 0;
     this.wheelDelta = 0;
     this.justPressedKeys.clear();
     this.justPressedMouse.clear();

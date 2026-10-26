@@ -67,6 +67,12 @@ export class GameEngine {
   // Active 3D Bullet Tracers
   private tracerLines: { line: THREE.Line; life: number; maxLife: number }[] = [];
 
+  // Active vortex singularities (replaces setInterval)
+  private activeVortices: { ring: THREE.Mesh; life: number; maxLife: number; pos: THREE.Vector3 }[] = [];
+
+  // Active decoy holograms (replaces setTimeout)
+  private activeDecoys: { mesh: THREE.Mesh; life: number; maxLife: number }[] = [];
+
   // Visual Effect Group
   private vfxGroup: THREE.Group;
 
@@ -281,7 +287,8 @@ export class GameEngine {
     this.gacha.update(dt);
 
     const isMoving = this.input.isHeld('KeyW') || this.input.isHeld('KeyS') || this.input.isHeld('KeyA') || this.input.isHeld('KeyD');
-    const abilityExec = this.player.update(dt, this.input, this.city, this.gacha, computedStats.speed);
+    // Pass the delta that input.update() already consumed so player camera reads correctly
+    const abilityExec = this.player.update(dt, this.input, mouseDelta, this.city, this.gacha, computedStats.speed);
 
     // Execute 3D Visual Effects for Abilities
     if (abilityExec.executedAbilityName) {
@@ -341,7 +348,7 @@ export class GameEngine {
 
     this.projectiles.update(dt, timeDilationFactor);
 
-    const aiImpact = this.ai.update(dt, this.player.position, this.city, this.projectiles, timeDilationFactor);
+    const aiImpact = this.ai.update(dt, this.player.position, this.city, this.projectiles, timeDilationFactor, this.camera);
     if (aiImpact.damageDealt > 0) {
       this.player.takeDamage(aiImpact.damageDealt);
       this.screenShakeIntensity = 0.35;
@@ -390,6 +397,8 @@ export class GameEngine {
 
     this.updateParticles(dt);
     this.updateTracers(dt);
+    this.updateVortices(dt);
+    this.updateDecoys(dt);
     this.updateFloatingTexts(dt);
 
     this.stats.stylePoints = this.player.stylePoints;
@@ -535,12 +544,21 @@ export class GameEngine {
     decoy.position.copy(pos);
     decoy.position.y += 0.9;
     this.vfxGroup.add(decoy);
+    this.activeDecoys.push({ mesh: decoy, life: 0, maxLife: 4.0 });
+  }
 
-    setTimeout(() => {
-      this.vfxGroup.remove(decoy);
-      geo.dispose();
-      mat.dispose();
-    }, 4000);
+  private updateDecoys(dt: number): void {
+    for (let i = this.activeDecoys.length - 1; i >= 0; i--) {
+      const d = this.activeDecoys[i];
+      d.life += dt;
+      (d.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.8 * (1 - d.life / d.maxLife));
+      if (d.life >= d.maxLife) {
+        this.vfxGroup.remove(d.mesh);
+        d.mesh.geometry.dispose();
+        (d.mesh.material as THREE.Material).dispose();
+        this.activeDecoys.splice(i, 1);
+      }
+    }
   }
 
   private spawnSeismicGroundSlam(pos: THREE.Vector3): void {
@@ -569,22 +587,30 @@ export class GameEngine {
     ring.position.y += 1.5;
     this.vfxGroup.add(ring);
 
-    // Pull in nearby enemies
-    const pullInterval = setInterval(() => {
+    this.activeVortices.push({ ring, life: 0, maxLife: 4.5, pos: ring.position.clone() });
+  }
+
+  private updateVortices(dt: number): void {
+    for (let i = this.activeVortices.length - 1; i >= 0; i--) {
+      const v = this.activeVortices[i];
+      v.life += dt;
+      v.ring.rotation.z += dt * 2.5;
+
+      // Pull enemies every frame
       for (const unit of this.ai.units) {
-        if (unit.position.distanceTo(ring.position) < 18.0) {
-          const pullDir = ring.position.clone().sub(unit.position).normalize().multiplyScalar(12);
+        if (unit.position.distanceTo(v.pos) < 18.0) {
+          const pullDir = v.pos.clone().sub(unit.position).normalize().multiplyScalar(12 * dt);
           unit.velocity.add(pullDir);
         }
       }
-    }, 100);
 
-    setTimeout(() => {
-      clearInterval(pullInterval);
-      this.vfxGroup.remove(ring);
-      geo.dispose();
-      mat.dispose();
-    }, 4500);
+      if (v.life >= v.maxLife) {
+        this.vfxGroup.remove(v.ring);
+        v.ring.geometry.dispose();
+        (v.ring.material as THREE.Material).dispose();
+        this.activeVortices.splice(i, 1);
+      }
+    }
   }
 
   private spawnNaniteSeekerSwarm(pos: THREE.Vector3): void {

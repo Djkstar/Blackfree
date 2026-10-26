@@ -41,6 +41,8 @@ export interface AIUnit {
   eyeLight: THREE.PointLight;
   speechText: string | null;
   speechTimer: number;
+  hitFlashTimer: number;
+  accentColor: number;
   pet: CyberPet | null;
 }
 
@@ -210,6 +212,8 @@ export class AIManager {
       eyeLight,
       speechText: null,
       speechTimer: 0,
+      hitFlashTimer: 0,
+      accentColor,
       pet,
     };
 
@@ -260,7 +264,8 @@ export class AIManager {
     playerPos: THREE.Vector3,
     city: CityManager,
     projectiles: ProjectileManager,
-    timeDilationFactor: number = 1.0
+    timeDilationFactor: number = 1.0,
+    camera?: THREE.Camera
   ): { hitsOnPlayer: number; damageDealt: number; shardDrops: number } {
     let hitsOnPlayer = 0;
     let damageDealt = 0;
@@ -271,13 +276,25 @@ export class AIManager {
       const effectiveDt = dt * timeDilationFactor;
       const stats = this.baseStats[unit.occupation];
 
-      // Update Overhead Health Bar scale & face camera
+      // Update Overhead Health Bar — scale by HP and billboard toward camera
       const hpPct = Math.max(0, Math.min(1, unit.health / unit.maxHealth));
       unit.healthBarMesh.scale.set(hpPct, 1, 1);
+      if (camera) {
+        unit.healthBarMesh.lookAt(camera.position);
+      }
 
       if (unit.speechTimer > 0) {
         unit.speechTimer -= dt;
         if (unit.speechTimer <= 0) unit.speechText = null;
+      }
+
+      // Hit flash — frame-accurate visor color pulse, no setTimeout
+      if (unit.hitFlashTimer > 0) {
+        unit.hitFlashTimer -= dt;
+        if (unit.hitFlashTimer <= 0) {
+          const col = unit.relationship === 'nemesis' ? 0xef4444 : 0x38bdf8;
+          (unit.visorMesh.material as THREE.MeshBasicMaterial).color.setHex(col);
+        }
       }
 
       // Distance to Player
@@ -419,10 +436,20 @@ export class AIManager {
       unit.position.addScaledVector(unit.velocity, effectiveDt);
 
       const ground = city.getGroundHeight(unit.position, 0.5);
-      if (unit.position.y <= ground.height) {
-        unit.position.y = ground.height;
+      const floorY = ground.height > -900 ? ground.height : 20; // fallback to main plaza if no platform
+      if (unit.position.y <= floorY) {
+        unit.position.y = floorY;
         unit.velocity.y = 0;
         unit.isGrounded = true;
+      }
+      // If NPC fell far below the city, teleport back to main plaza
+      if (unit.position.y < 10) {
+        unit.position.set(
+          (Math.random() - 0.5) * 20,
+          22,
+          (Math.random() - 0.5) * 20
+        );
+        unit.velocity.set(0, 0, 0);
       }
 
       unit.mesh.position.copy(unit.position);
@@ -505,12 +532,7 @@ export class AIManager {
     }
 
     (unit.visorMesh.material as THREE.MeshBasicMaterial).color.setHex(0xffffff);
-    setTimeout(() => {
-      if (unit.mesh.parent) {
-        const color = unit.relationship === 'nemesis' ? 0xef4444 : 0x38bdf8;
-        (unit.visorMesh.material as THREE.MeshBasicMaterial).color.setHex(color);
-      }
-    }, 80);
+    unit.hitFlashTimer = 0.08;
 
     if (unit.health <= 0) {
       this.destroyCitizen(unit);

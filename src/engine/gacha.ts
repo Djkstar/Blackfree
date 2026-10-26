@@ -115,9 +115,11 @@ export class GachaManager {
 
     sound.playMutationChime();
 
+    // Cap total refund at 1 shard per multi-roll to preserve economy
+    const cappedRefund = Math.min(totalRefunded, 1);
     return {
       results,
-      remainingShards: availableShards - 4 + totalRefunded,
+      remainingShards: availableShards - 4 + cappedRefund,
       success: true,
     };
   }

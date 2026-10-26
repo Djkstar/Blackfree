@@ -40,7 +40,7 @@ export class PlayerController {
   public yaw: number = 0;
   private targetFov: number = 85;
 
-  // History buffer for Temporal Reversal (3 seconds)
+  // History buffer for Temporal Reversal (3 seconds at ~60fps = 180 entries)
   private history: { pos: THREE.Vector3; health: number; time: number }[] = [];
 
   // Vitals
@@ -57,6 +57,10 @@ export class PlayerController {
   public overdriveTimer: number = 0;
   public isInvulnerable: boolean = false;
   public invulnerableTimer: number = 0;
+
+  // Ground slam pending (replaces setTimeout)
+  private groundSlamPending: boolean = false;
+  private groundSlamTimer: number = 0;
 
   // Style System
   public stylePoints: number = 0;
@@ -95,6 +99,8 @@ export class PlayerController {
     this.overdriveTimer = 0;
     this.isInvulnerable = false;
     this.invulnerableTimer = 0;
+    this.groundSlamPending = false;
+    this.groundSlamTimer = 0;
     this.stylePoints = 0;
     this.styleRank = 'FRESH';
     this.history = [];
@@ -103,6 +109,7 @@ export class PlayerController {
   public update(
     dt: number,
     input: InputManager,
+    inputDelta: { dx: number; dy: number },
     city: CityManager,
     gacha: GachaManager,
     speedMultiplier: number = 1.0
@@ -119,10 +126,10 @@ export class PlayerController {
 
     if (this.isDead) return result;
 
-    // 1. Camera Look Rotation (Silky smooth delta from Mouse Look or Keyboard Turn)
+    // 1. Camera Look Rotation — use the delta returned from input.update(), not stale fields
     const mouseSens = 0.0024;
-    this.yaw -= input.mouseDeltaX * mouseSens;
-    this.pitch -= input.mouseDeltaY * mouseSens;
+    this.yaw -= inputDelta.dx * mouseSens;
+    this.pitch -= inputDelta.dy * mouseSens;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -Math.PI / 2.05, Math.PI / 2.05);
 
     this.camera.rotation.set(0, 0, 0);
@@ -229,7 +236,18 @@ export class PlayerController {
       this.velocity.y -= this.GRAVITY * dt;
     }
 
-    // 9. Position Integration
+    // 9. Ground Slam deferred trigger (frame-accurate, no setTimeout)
+    if (this.groundSlamPending) {
+      this.groundSlamTimer -= dt;
+      if (this.groundSlamTimer <= 0) {
+        this.groundSlamPending = false;
+        this.velocity.y = -42;
+        result.triggerGroundSlam = true;
+        sound.playGravityWell();
+      }
+    }
+
+    // 10. Position Integration
     this.position.addScaledVector(this.velocity, dt);
 
     if (this.position.y <= groundCheck.height) {
@@ -252,11 +270,15 @@ export class PlayerController {
       this.moveTime += dt;
     }
 
-    // 10. Temporal History Recorder
-    this.history.push({ pos: this.position.clone(), health: this.health, time: performance.now() });
-    if (this.history.length > 180) this.history.shift();
+    // 11. Temporal History Recorder
+    const now = performance.now();
+    this.history.push({ pos: this.position.clone(), health: this.health, time: now });
+    // Keep ~3 seconds of history at 60fps
+    while (this.history.length > 1 && now - this.history[0].time > 3000) {
+      this.history.shift();
+    }
 
-    // 11. Ability Hotbar Keys (Q, E, Z, X)
+    // 12. Ability Hotbar Keys (Q, E, Z, X)
     let triggeredSlot: number | null = null;
     if (input.isJustPressed('KeyQ')) triggeredSlot = 0;
     else if (input.isJustPressed('KeyE')) triggeredSlot = 1;
@@ -306,19 +328,14 @@ export class PlayerController {
         break;
       }
       case 'ground_slam': {
-        // If on ground, leap upward first before seismic crash!
+        // Use a frame-accurate timer instead of setTimeout so triggerGroundSlam
+        // is correctly set on the result when it fires
         if (this.isGrounded) {
           this.velocity.y = 14;
-          setTimeout(() => {
-            this.velocity.y = -42;
-            result.triggerGroundSlam = true;
-            sound.playGravityWell();
-          }, 250);
-        } else {
-          this.velocity.y = -42;
-          result.triggerGroundSlam = true;
-          sound.playGravityWell();
         }
+        this.groundSlamPending = true;
+        this.groundSlamTimer = 0.25;
+        sound.playGravityWell();
         break;
       }
       case 'zero_gravity': {
@@ -364,9 +381,20 @@ export class PlayerController {
       }
       case 'rewind_time': {
         if (this.history.length > 0) {
-          const past = this.history[0];
-          this.position.copy(past.pos);
-          this.health = Math.max(this.health, past.health);
+          // Find the entry closest to 3 seconds ago
+          const targetTime = performance.now() - 3000;
+          let best = this.history[0];
+          let bestDiff = Math.abs(this.history[0].time - targetTime);
+          for (const entry of this.history) {
+            const diff = Math.abs(entry.time - targetTime);
+            if (diff < bestDiff) {
+              bestDiff = diff;
+              best = entry;
+            }
+          }
+          this.position.copy(best.pos);
+          this.health = Math.max(this.health, best.health);
+          this.velocity.set(0, 0, 0);
           sound.playParryDing();
         }
         break;
