@@ -1,0 +1,6 @@
+{
+  "name": "Blackfree: Anomaly Protocol",
+  "description": "Fast-paced 3D cyberpunk parkour shooter with mutating sentient skill trees, Chrono/Vector origins, evolving AI combatants, and rogue-like System Instability.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
