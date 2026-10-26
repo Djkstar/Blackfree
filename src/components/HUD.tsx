@@ -165,7 +165,7 @@ export const HUD: React.FC<HUDProps> = ({
                       : 'bg-slate-950/80 border-cyan-500/80 text-cyan-200'
                   }`}
                 >
-                  <strong className="mr-1">[{u.name} · {u.occupation.toUpperCase()}]:</strong>
+                  <strong className="mr-1">[{u.name} · {u.faction.replace('_', ' ').toUpperCase()}]:</strong>
                   <span>{u.speechText}</span>
                 </div>
               ))}
@@ -273,7 +273,7 @@ export const HUD: React.FC<HUDProps> = ({
         <div className="flex flex-col items-center gap-1.5">
           {nearestCitizen && (
             <div className="bg-emerald-950/95 border border-emerald-400 text-emerald-200 text-xs px-4 py-1.5 shadow-lg shadow-emerald-950/50 animate-bounce font-bold tracking-wider">
-              ⚡ [F] TALK WITH {nearestCitizen.name.toUpperCase()} [{nearestCitizen.occupation.toUpperCase()}]
+              ⚡ [F] TRADE & DIPLOMACY // {nearestCitizen.name.toUpperCase()} [{nearestCitizen.faction.toUpperCase()}]
             </div>
           )}
           <button

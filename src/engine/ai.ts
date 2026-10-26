@@ -9,6 +9,7 @@ import { NPCOccupation, NPCRelationship, CyberPetType, EnemyStats } from '../typ
 import { CityManager } from './city.ts';
 import { ProjectileManager } from './projectiles.ts';
 import { sound } from './audio.ts';
+import { SocialInteractionEngine, FactionId, TradeItem } from './social.ts';
 
 export interface CyberPet {
   type: CyberPetType;
@@ -23,14 +24,20 @@ export interface AIUnit {
   name: string;
   occupation: NPCOccupation;
   relationship: NPCRelationship;
+  faction: FactionId;
+  inventory: TradeItem[];
+  shards: number;
+  tradeCooldown: number;
+  escortingPlayer?: boolean;
   mesh: THREE.Group;
   visorMesh: THREE.Mesh;
   healthBarMesh: THREE.Mesh;
+  factionBadgeMesh: THREE.Mesh;
   position: THREE.Vector3;
   velocity: THREE.Vector3;
   health: number;
   maxHealth: number;
-  state: 'roam' | 'job_task' | 'chase' | 'attack_windup' | 'wall_run' | 'contest_loot';
+  state: 'roam' | 'job_task' | 'chase' | 'attack_windup' | 'wall_run' | 'contest_loot' | 'escort';
   targetEnemy: AIUnit | 'player' | null;
   windupTimer: number;
   attackCooldown: number;
@@ -94,8 +101,11 @@ export class AIManager {
     anomaly_hunter: { generation: 1, maxHealth: 380, speed: 13.5, damage: 45, attackInterval: 0.85, canWallRun: true, canBulletClimb: true, evasionChance: 0.45 },
   };
 
+  public social: SocialInteractionEngine;
+
   constructor() {
     this.group = new THREE.Group();
+    this.social = new SocialInteractionEngine();
   }
 
   public triggerGenerationalEvolution(): void {
@@ -120,17 +130,18 @@ export class AIManager {
     occupation: NPCOccupation,
     relationship: NPCRelationship,
     spawnPos: THREE.Vector3,
-    customName?: string
+    customName?: string,
+    customFaction?: FactionId
   ): AIUnit {
     const stats = this.baseStats[occupation];
     const unitGroup = new THREE.Group();
     const name = customName || NPC_NAMES[Math.floor(Math.random() * NPC_NAMES.length)];
+    const faction: FactionId = customFaction || this.social.getFactionForOccupation(occupation);
+    const factionInfo = this.social.factions[faction];
 
     let primaryColor = 0x1e293b;
-    let accentColor = 0x38bdf8;
-    if (relationship === 'ally') accentColor = 0x10b981;
-    else if (relationship === 'rival') accentColor = 0xf59e0b;
-    else if (relationship === 'nemesis') accentColor = 0xef4444;
+    let accentColor = factionInfo.colorHex;
+    if (relationship === 'nemesis') accentColor = 0xef4444;
 
     if (occupation === 'netrunner') primaryColor = 0x0f172a;
     else if (occupation === 'enforcer') primaryColor = 0x1e1b4b;
@@ -178,6 +189,13 @@ export class AIManager {
     hpBar.position.set(0, 2.45, 0);
     unitGroup.add(hpBar);
 
+    // Overhead 3D Faction Sigil (Rotating Octahedron)
+    const factionSigilGeo = new THREE.OctahedronGeometry(0.14);
+    const factionSigilMat = new THREE.MeshBasicMaterial({ color: factionInfo.colorHex, wireframe: false });
+    const factionSigil = new THREE.Mesh(factionSigilGeo, factionSigilMat);
+    factionSigil.position.set(0, 2.7, 0);
+    unitGroup.add(factionSigil);
+
     // Cyber-Pet
     let pet: CyberPet | null = null;
     if (Math.random() < 0.75 || occupation === 'anomaly_hunter' || occupation === 'enforcer') {
@@ -190,13 +208,18 @@ export class AIManager {
     this.group.add(unitGroup);
 
     const unit: AIUnit = {
-      id: `npc_${Date.now()}_${Math.random()}`,
+      id: `npc_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
       name,
       occupation,
       relationship,
+      faction,
+      inventory: this.social.generateStartingInventory(),
+      shards: 2 + Math.floor(Math.random() * 3),
+      tradeCooldown: 3.0 + Math.random() * 4.0,
       mesh: unitGroup,
       visorMesh: visor,
       healthBarMesh: hpBar,
+      factionBadgeMesh: factionSigil,
       position: spawnPos.clone(),
       velocity: new THREE.Vector3(0, 0, 0),
       health: stats.maxHealth,
@@ -218,7 +241,7 @@ export class AIManager {
     };
 
     this.units.push(unit);
-    this.triggerSpeech(unit, `Online. Sector-07 ${occupation.toUpperCase()} ready.`);
+    this.triggerSpeech(unit, `Online. Sector-07 [${factionInfo.name}] ${occupation.toUpperCase()} ready.`);
     return unit;
   }
 
@@ -271,28 +294,65 @@ export class AIManager {
     let damageDealt = 0;
     let shardDrops = 0;
 
+    // Tick social trades & trust decay/beams
+    this.social.update(dt);
+
+    // 1. Autonomous Inter-NPC Trading Check
+    for (let a = 0; a < this.units.length; a++) {
+      const unitA = this.units[a];
+      if (unitA.tradeCooldown > 0 || unitA.relationship === 'nemesis' || unitA.state === 'chase' || unitA.state === 'attack_windup') continue;
+
+      for (let b = a + 1; b < this.units.length; b++) {
+        const unitB = this.units[b];
+        if (unitB.tradeCooldown > 0 || unitB.relationship === 'nemesis' || unitB.state === 'chase' || unitB.state === 'attack_windup') continue;
+
+        if (unitA.position.distanceTo(unitB.position) < 4.5) {
+          const tradeResult = this.social.attemptTrade(
+            { id: unitA.id, name: unitA.name, faction: unitA.faction, pos: [unitA.position.x, unitA.position.y + 1, unitA.position.z], inventory: unitA.inventory, shards: unitA.shards },
+            { id: unitB.id, name: unitB.name, faction: unitB.faction, pos: [unitB.position.x, unitB.position.y + 1, unitB.position.z], inventory: unitB.inventory, shards: unitB.shards }
+          );
+
+          if (tradeResult.success) {
+            unitA.tradeCooldown = 14.0;
+            unitB.tradeCooldown = 14.0;
+            this.triggerSpeech(unitA, `Deal closed with ${unitB.name}. Data/item transfer complete.`);
+            this.triggerSpeech(unitB, `Payment verified. Shards balanced.`);
+            sound.playMutationChime();
+            break;
+          }
+        }
+      }
+    }
+
     for (let i = this.units.length - 1; i >= 0; i--) {
       const unit = this.units[i];
       const effectiveDt = dt * timeDilationFactor;
       const stats = this.baseStats[unit.occupation];
 
-      // Update Overhead Health Bar — scale by HP and billboard toward camera
+      // Tick trade cooldown
+      if (unit.tradeCooldown > 0) {
+        unit.tradeCooldown -= effectiveDt;
+      }
+
+      // Update Overhead Health Bar & Faction Sigil
       const hpPct = Math.max(0, Math.min(1, unit.health / unit.maxHealth));
       unit.healthBarMesh.scale.set(hpPct, 1, 1);
       if (camera) {
         unit.healthBarMesh.lookAt(camera.position);
       }
+      unit.factionBadgeMesh.rotation.y += effectiveDt * 2.5;
+      unit.factionBadgeMesh.rotation.x += effectiveDt * 1.2;
 
       if (unit.speechTimer > 0) {
         unit.speechTimer -= dt;
         if (unit.speechTimer <= 0) unit.speechText = null;
       }
 
-      // Hit flash — frame-accurate visor color pulse, no setTimeout
+      // Hit flash — frame-accurate visor color pulse
       if (unit.hitFlashTimer > 0) {
         unit.hitFlashTimer -= dt;
         if (unit.hitFlashTimer <= 0) {
-          const col = unit.relationship === 'nemesis' ? 0xef4444 : 0x38bdf8;
+          const col = unit.relationship === 'nemesis' ? 0xef4444 : this.social.factions[unit.faction].colorHex;
           (unit.visorMesh.material as THREE.MeshBasicMaterial).color.setHex(col);
         }
       }
@@ -309,32 +369,46 @@ export class AIManager {
         unit.mesh.rotation.y = THREE.MathUtils.damp(unit.mesh.rotation.y, targetAngle, 8, effectiveDt);
       }
 
-      // 1. Inter-NPC Conflict & Targeting:
-      // Rivals, Nemeses, and Enforcers actively fight each other!
+      // 2. Faction Dynamics & Inter-NPC Conflict Targeting:
       let targetPos: THREE.Vector3 | null = null;
       let targetIsPlayer = false;
 
       if (unit.relationship === 'nemesis') {
         targetPos = playerPos;
         targetIsPlayer = true;
-      } else if (unit.relationship === 'rival') {
-        // Find another rival or nemesis to fight
-        const otherHostile = this.units.find((u) => u !== unit && (u.relationship === 'nemesis' || u.occupation === 'anomaly_hunter'));
-        if (otherHostile) {
-          targetPos = otherHostile.position;
-        } else if (distToPlayer < 12) {
+      } else if (unit.escortingPlayer) {
+        // Find any threat to player
+        const threat = this.units.find((u) => u !== unit && (u.relationship === 'nemesis' || u.occupation === 'anomaly_hunter'));
+        if (threat) {
+          targetPos = threat.position;
+        } else if (distToPlayer > 4.5) {
+          // Follow player in escort formation
+          targetPos = playerPos.clone().add(new THREE.Vector3(2.5, 0, 2.5));
+        }
+      } else if (unit.relationship === 'ally') {
+        const threat = this.units.find((u) => u.relationship === 'nemesis' || u.occupation === 'anomaly_hunter');
+        if (threat) targetPos = threat.position;
+      } else {
+        // Dynamic Faction Warfare: Attack units belonging to enemy factions if nearby
+        const factionDef = this.social.factions[unit.faction];
+        const enemyFactionUnit = this.units.find(
+          (other) =>
+            other !== unit &&
+            (factionDef.enemies.includes(other.faction) || this.social.getTrust(unit.id, other.id) < -15) &&
+            unit.position.distanceTo(other.position) < 26
+        );
+
+        if (enemyFactionUnit) {
+          targetPos = enemyFactionUnit.position;
+        } else if (unit.relationship === 'rival' && distToPlayer < 10) {
           targetPos = playerPos;
           targetIsPlayer = true;
         }
-      } else if (unit.relationship === 'ally') {
-        // Allies target the nearest hostile threatening player
-        const threat = this.units.find((u) => u.relationship === 'nemesis' || u.occupation === 'anomaly_hunter');
-        if (threat) targetPos = threat.position;
       }
 
       unit.jobTimer -= effectiveDt;
 
-      // 2. Behavior State Machine
+      // 3. Behavior State Machine
       switch (unit.state) {
         case 'roam': {
           if (unit.jobTimer <= 0) {
@@ -373,7 +447,7 @@ export class AIManager {
             const dist = toTarget.length();
             const dir = toTarget.clone().normalize();
 
-            if (dist > 7) {
+            if (dist > (unit.escortingPlayer && !targetIsPlayer ? 3.5 : 7)) {
               unit.velocity.x = dir.x * stats.speed;
               unit.velocity.z = dir.z * stats.speed;
             } else {
@@ -383,7 +457,7 @@ export class AIManager {
             }
 
             unit.attackCooldown -= effectiveDt;
-            if (unit.attackCooldown <= 0 && dist < 30) {
+            if (unit.attackCooldown <= 0 && dist < 30 && (!unit.escortingPlayer || targetPos !== playerPos)) {
               unit.state = 'attack_windup';
               unit.windupTimer = 0.45;
               unit.eyeLight.intensity = 3.0;
@@ -423,8 +497,8 @@ export class AIManager {
               shootDir,
               30,
               stats.damage,
-              unit.relationship === 'ally',
-              unit.relationship === 'ally' ? 0x10b981 : unit.relationship === 'nemesis' ? 0xef4444 : 0xf59e0b
+              unit.relationship === 'ally' || unit.escortingPlayer === true,
+              unit.relationship === 'ally' ? 0x10b981 : unit.relationship === 'nemesis' ? 0xef4444 : this.social.factions[unit.faction].colorHex
             );
           }
           break;
@@ -436,25 +510,20 @@ export class AIManager {
       unit.position.addScaledVector(unit.velocity, effectiveDt);
 
       const ground = city.getGroundHeight(unit.position, 0.5);
-      const floorY = ground.height > -900 ? ground.height : 20; // fallback to main plaza if no platform
+      const floorY = ground.height > -900 ? ground.height : 20;
       if (unit.position.y <= floorY) {
         unit.position.y = floorY;
         unit.velocity.y = 0;
         unit.isGrounded = true;
       }
-      // If NPC fell far below the city, teleport back to main plaza
       if (unit.position.y < 10) {
-        unit.position.set(
-          (Math.random() - 0.5) * 20,
-          22,
-          (Math.random() - 0.5) * 20
-        );
+        unit.position.set((Math.random() - 0.5) * 20, 22, (Math.random() - 0.5) * 20);
         unit.velocity.set(0, 0, 0);
       }
 
       unit.mesh.position.copy(unit.position);
 
-      // 3. Cyber-Pet Active Behaviors (Fires micro-lasers and follows)
+      // 4. Cyber-Pet Active Behaviors
       if (unit.pet) {
         const petOffset = unit.pet.type === 'recon_drone'
           ? new THREE.Vector3(0.6, 2.2 + Math.sin(Date.now() * 0.005) * 0.15, -0.4)
@@ -473,13 +542,13 @@ export class AIManager {
             petShootDir,
             38,
             12,
-            unit.relationship === 'ally',
-            0x38bdf8
+            unit.relationship === 'ally' || unit.escortingPlayer === true,
+            this.social.factions[unit.faction].colorHex
           );
         }
       }
 
-      // Melee collision damage
+      // Melee collision damage on player
       if (targetIsPlayer && distToPlayer < 1.6 && unit.attackCooldown <= 0.2) {
         hitsOnPlayer++;
         damageDealt += 16;
@@ -490,19 +559,32 @@ export class AIManager {
     return { hitsOnPlayer, damageDealt, shardDrops };
   }
 
-  public interactWithNearbyCitizen(playerPos: THREE.Vector3): { success: boolean; text: string; shardGift: number } {
+  public interactWithNearbyCitizen(playerPos: THREE.Vector3): {
+    success: boolean;
+    unit: AIUnit | null;
+    text: string;
+    trust: number;
+    shardGift: number;
+  } {
     for (const unit of this.units) {
-      if (unit.position.distanceTo(playerPos) < 4.0) {
+      if (unit.position.distanceTo(playerPos) < 4.2) {
+        const trust = this.social.getTrust(unit.id, 'player');
         if (unit.relationship === 'nemesis') {
-          return { success: false, text: `${unit.name}: 'Die, runner!'`, shardGift: 0 };
+          return { success: false, unit, text: `${unit.name}: 'Target locked! Die, anomaly runner!'`, trust: -100, shardGift: 0 };
         }
 
         const shards = unit.relationship === 'ally' ? 2 : 1;
-        this.triggerSpeech(unit, `Thanks for the backup! Take these ${shards} Quantum Shards.`);
-        return { success: true, text: `Talked with ${unit.name} (+${shards} Shards)`, shardGift: shards };
+        this.social.modifyTrust(unit.id, 'player', 10);
+        return {
+          success: true,
+          unit,
+          text: `Contact established with ${unit.name} [${this.social.factions[unit.faction].name}].`,
+          trust,
+          shardGift: shards,
+        };
       }
     }
-    return { success: false, text: 'No citizens close enough to talk (Approach within 4m).', shardGift: 0 };
+    return { success: false, unit: null, text: 'No citizens within 4m radius.', trust: 0, shardGift: 0 };
   }
 
   public triggerSpeech(unit: AIUnit, text: string): void {
@@ -525,6 +607,9 @@ export class AIManager {
   ): { killed: boolean; shardReward: number } {
     unit.health -= damage;
     unit.velocity.add(knockback);
+
+    this.social.modifyTrust(unit.id, 'player', -35);
+    this.social.modifyPlayerReputation(unit.faction, -20);
 
     if (unit.relationship === 'ally' || unit.relationship === 'neutral') {
       unit.relationship = 'nemesis';

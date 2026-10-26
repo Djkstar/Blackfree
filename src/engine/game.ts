@@ -75,6 +75,7 @@ export class GameEngine {
 
   // Visual Effect Group
   private vfxGroup: THREE.Group;
+  private tradeBeamLines: THREE.Line[] = [];
 
   // Callbacks for UI updates
   public onStateUpdate?: (
@@ -85,6 +86,7 @@ export class GameEngine {
     aiUnits: AIUnit[],
     isPointerLocked: boolean
   ) => void;
+  public onOpenTrade?: (unit: AIUnit) => void;
   public onGameOver?: (stats: GameStats, reason: 'elimination' | 'system_wipe') => void;
 
   constructor(mount: HTMLElement, chosenOrigin: OriginType) {
@@ -270,12 +272,17 @@ export class GameEngine {
     // Key F: Interact with nearby citizen!
     if (this.input.isJustPressed('KeyF')) {
       const talk = this.ai.interactWithNearbyCitizen(this.player.position);
-      if (talk.success) {
-        this.addFloatingText(talk.text, this.player.position, '#10b981');
-        this.stats.evolutionShards += talk.shardGift;
-        this.skills.addShards(talk.shardGift);
-        this.addCityEvent(talk.text, 'social');
-        sound.playMutationChime();
+      if (talk.success && talk.unit) {
+        if (this.onOpenTrade) {
+          this.onOpenTrade(talk.unit);
+          this.input.exitPointerLock();
+        } else {
+          this.addFloatingText(talk.text, this.player.position, '#10b981');
+          this.stats.evolutionShards += talk.shardGift;
+          this.skills.addShards(talk.shardGift);
+          this.addCityEvent(talk.text, 'social');
+          sound.playMutationChime();
+        }
       } else {
         this.addFloatingText(talk.text, this.player.position, '#94a3b8');
       }
@@ -347,6 +354,8 @@ export class GameEngine {
     }
 
     this.projectiles.update(dt, timeDilationFactor);
+    this.city.update(dt);
+    this.updateTradeBeams(dt);
 
     const aiImpact = this.ai.update(dt, this.player.position, this.city, this.projectiles, timeDilationFactor, this.camera);
     if (aiImpact.damageDealt > 0) {
@@ -771,6 +780,97 @@ export class GameEngine {
     this.gacha.reset(chosenOrigin);
     this.spawnInitialPopulation();
     this.start();
+  }
+
+  public buyItemFromCitizen(unit: AIUnit, itemId: string): { success: boolean; message: string } {
+    const res = this.ai.social.playerPurchaseItem(unit, itemId, this.skills.evolutionShards);
+    if (res.success && res.item) {
+      this.skills.evolutionShards = res.remainingShards;
+      this.stats.evolutionShards = res.remainingShards;
+      this.addFloatingText(res.message, this.player.position, '#10b981');
+      this.addCityEvent(res.message, 'social');
+      sound.playMutationChime();
+
+      // Apply tactical bonus based on item purchased
+      if (res.item.id === 'nanite_core') {
+        this.player.shield = Math.min(this.player.maxShield, this.player.shield + 40);
+        this.addFloatingText('+40 SHIELD RESTORED', this.player.position, '#38bdf8');
+      } else if (res.item.id === 'overclock_chip') {
+        this.gacha.cooldownTimers = this.gacha.cooldownTimers.map((c) => Math.max(0, c * 0.5));
+        this.addFloatingText('ABILITIES OVERCLOCKED (-50% CD)', this.player.position, '#f59e0b');
+      } else if (res.item.id === 'grav_capacitor') {
+        this.player.velocity.y = 18;
+        this.addFloatingText('GRAV BOOST ACTIVATED', this.player.position, '#c084fc');
+      } else if (res.item.id === 'cyber_stim') {
+        this.player.isTimeDilated = true;
+        this.player.timeDilationTimer = 3.0;
+        this.addFloatingText('BULLET TIME ENGAGED', this.player.position, '#06b6d4');
+      } else if (res.item.id === 'anomaly_catalyst') {
+        this.skills.addShards(5);
+        this.stats.evolutionShards += 5;
+        this.addFloatingText('+5 ANOMALY SHARDS AWARDED', this.player.position, '#ec4899');
+      }
+
+      return { success: true, message: res.message };
+    }
+    return { success: false, message: res.message };
+  }
+
+  public giftShardsToCitizen(unit: AIUnit, amount: number): { success: boolean; message: string } {
+    const res = this.ai.social.playerGiftShards(unit, amount, this.skills.evolutionShards);
+    if (res.success) {
+      this.skills.evolutionShards = res.remainingShards;
+      this.stats.evolutionShards = res.remainingShards;
+      this.addFloatingText(res.message, this.player.position, '#38bdf8');
+      this.addCityEvent(res.message, 'social');
+      sound.playMutationChime();
+      return { success: true, message: res.message };
+    }
+    return { success: false, message: res.message };
+  }
+
+  public recruitCitizenAsEscort(unit: AIUnit): { success: boolean; message: string } {
+    const trust = this.ai.social.getTrust(unit.id, 'player');
+    if (trust < 30) {
+      return { success: false, message: `${unit.name} does not trust you enough yet (Trust: ${trust}/30 required).` };
+    }
+    unit.escortingPlayer = true;
+    unit.relationship = 'ally';
+    const msg = `${unit.name} [${this.ai.social.factions[unit.faction].name}] is now escorting you in Sector-07!`;
+    this.addFloatingText(msg, this.player.position, '#10b981');
+    this.addCityEvent(msg, 'social');
+    sound.playParryDing();
+    return { success: true, message: msg };
+  }
+
+  private updateTradeBeams(_dt: number): void {
+    // Clear old lines
+    for (const line of this.tradeBeamLines) {
+      this.vfxGroup.remove(line);
+      line.geometry.dispose();
+      (line.material as THREE.Material).dispose();
+    }
+    this.tradeBeamLines = [];
+
+    // Render active trades
+    for (const trade of this.ai.social.activeTrades) {
+      const p1 = new THREE.Vector3(...trade.giverPos);
+      const p2 = new THREE.Vector3(...trade.receiverPos);
+      const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+      const mat = new THREE.LineBasicMaterial({
+        color: 0xf59e0b,
+        linewidth: 3,
+        transparent: true,
+        opacity: Math.min(1, trade.life),
+      });
+      const line = new THREE.Line(geo, mat);
+      this.vfxGroup.add(line);
+      this.tradeBeamLines.push(line);
+
+      // Spawn mid-point data sparkle
+      const mid = p1.clone().add(p2).multiplyScalar(0.5);
+      this.spawnParticleBurst(mid, 0xf59e0b, 2);
+    }
   }
 
   public destroy(): void {

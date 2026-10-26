@@ -13,6 +13,7 @@ import { GachaModal } from './components/GachaModal.tsx';
 import { SkillTreeModal } from './components/SkillTreeModal.tsx';
 import { GameOverModal } from './components/GameOverModal.tsx';
 import { PauseModal } from './components/PauseModal.tsx';
+import { SocialTradeModal } from './components/SocialTradeModal.tsx';
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -22,6 +23,7 @@ export default function App() {
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [isSkillTreeOpen, setIsSkillTreeOpen] = useState<boolean>(false);
   const [isGachaOpen, setIsGachaOpen] = useState<boolean>(false);
+  const [activeTradeUnit, setActiveTradeUnit] = useState<AIUnit | null>(null);
   const [gameOverReason, setGameOverReason] = useState<'elimination' | 'system_wipe'>('elimination');
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isPointerLocked, setIsPointerLocked] = useState<boolean>(false);
@@ -111,6 +113,11 @@ export default function App() {
         }
       };
 
+      engine.onOpenTrade = (unit) => {
+        setActiveTradeUnit(unit);
+        engine.setPaused(true);
+      };
+
       setSkillNodes(Array.from(engine.skills.nodes.values()));
       engine.start();
     } else {
@@ -122,6 +129,7 @@ export default function App() {
     setIsPaused(false);
     setIsSkillTreeOpen(false);
     setIsGachaOpen(false);
+    setActiveTradeUnit(null);
   };
 
   const handleRestart = () => {
@@ -132,6 +140,7 @@ export default function App() {
       setIsPaused(false);
       setIsSkillTreeOpen(false);
       setIsGachaOpen(false);
+      setActiveTradeUnit(null);
     }
   };
 
@@ -158,7 +167,10 @@ export default function App() {
         });
       } else if (e.code === 'Escape') {
         e.preventDefault();
-        if (isGachaOpen) {
+        if (activeTradeUnit) {
+          setActiveTradeUnit(null);
+          engineRef.current?.setPaused(false);
+        } else if (isGachaOpen) {
           setIsGachaOpen(false);
           engineRef.current?.setPaused(false);
         } else if (isSkillTreeOpen) {
@@ -176,7 +188,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleGlobalKeys);
     return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [gameState, isGachaOpen, isSkillTreeOpen]);
+  }, [gameState, isGachaOpen, isSkillTreeOpen, activeTradeUnit]);
 
   // Gacha Actions
   const handleRollSingle = () => {
@@ -304,6 +316,21 @@ export default function App() {
           onRollSingle={handleRollSingle}
           onRollMulti={handleRollMulti}
           onEquipAbility={handleEquipAbility}
+        />
+      )}
+
+      {activeTradeUnit && engineRef.current && (
+        <SocialTradeModal
+          unit={activeTradeUnit}
+          social={engineRef.current.ai.social}
+          playerShards={stats.evolutionShards}
+          onClose={() => {
+            setActiveTradeUnit(null);
+            engineRef.current?.setPaused(false);
+          }}
+          onBuyItem={(itemId) => engineRef.current!.buyItemFromCitizen(activeTradeUnit, itemId)}
+          onGiftShards={(amount) => engineRef.current!.giftShardsToCitizen(activeTradeUnit, amount)}
+          onRecruitEscort={() => engineRef.current!.recruitCitizenAsEscort(activeTradeUnit)}
         />
       )}
 

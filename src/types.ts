@@ -78,6 +78,16 @@ export interface EnemyStats {
   evasionChance: number;
 }
 
+export type FactionId = 'syndicate' | 'wardens' | 'glitch_collective' | 'drifters';
+
+export interface TradeItem {
+  id: string;
+  name: string;
+  rarity: 'common' | 'rare' | 'epic';
+  valueShards: number;
+  effectDescription: string;
+}
+
 export type NPCOccupation = 'netrunner' | 'courier' | 'enforcer' | 'syndicate_merc' | 'anomaly_hunter';
 export type NPCRelationship = 'ally' | 'neutral' | 'rival' | 'nemesis';
 export type CyberPetType = 'recon_drone' | 'cyber_hound';
