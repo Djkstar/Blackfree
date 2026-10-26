@@ -100,6 +100,64 @@ export const INITIAL_SKILL_NODES: SkillNode[] = [
     prerequisites: ['chrono_rewind_3', 'vector_slam_3'],
     statsBonus: { damage: 1.5, speed: 1.25 },
   },
+  // --- CHRONO TIER 4-5 ---
+  {
+    id: 'chrono_stasis_4',
+    name: 'Temporal Stasis Grenade',
+    origin: 'chrono',
+    description: 'Throw a grenade that freezes all enemies and bullets in a 10m sphere for 3.5 seconds.',
+    cost: 3,
+    unlocked: false,
+    tier: 4,
+    prerequisites: ['chrono_rewind_3'],
+    statsBonus: { timeDilation: 1.2 },
+  },
+  {
+    id: 'chrono_echo_5',
+    name: 'Echo Self',
+    origin: 'chrono',
+    description: 'Spawn a temporal echo of yourself that fights for 8 seconds before dissolving.',
+    cost: 4,
+    unlocked: false,
+    tier: 5,
+    prerequisites: ['chrono_stasis_4'],
+    statsBonus: { damage: 1.45, speed: 1.2 },
+  },
+  // --- VECTOR TIER 4-5 ---
+  {
+    id: 'vector_orbit_4',
+    name: 'Debris Orbit',
+    origin: 'vector',
+    description: 'Rip 5 chunks of city debris into orbit around you, automatically deflecting incoming fire.',
+    cost: 3,
+    unlocked: false,
+    tier: 4,
+    prerequisites: ['vector_slam_3'],
+    statsBonus: { gravityControl: 1.8 },
+  },
+  {
+    id: 'vector_singularity_5',
+    name: 'Micro Singularity',
+    origin: 'vector',
+    description: 'Compress a point of spacetime so densely it shreds everything within 20m.',
+    cost: 5,
+    unlocked: false,
+    tier: 5,
+    prerequisites: ['vector_orbit_4'],
+    statsBonus: { damage: 1.6, gravityControl: 2.0 },
+  },
+  // --- HYBRID TIER 5 ---
+  {
+    id: 'hybrid_collapse',
+    name: 'Reality Collapse',
+    origin: 'hybrid',
+    description: 'Combine all active effects into a single detonation: gravity, time, and mass collapse simultaneously.',
+    cost: 5,
+    unlocked: false,
+    tier: 5,
+    prerequisites: ['hybrid_event_horizon', 'hybrid_quantum_rip'],
+    statsBonus: { damage: 2.0, timeDilation: 1.5, gravityControl: 2.0 },
+  },
 ];
 
 const AUTONOMOUS_MUTATIONS: Record<string, { name: string; desc: string; stats: SkillNode['statsBonus'] }[]> = {
@@ -139,6 +197,20 @@ const AUTONOMOUS_MUTATIONS: Record<string, { name: string; desc: string; stats: 
       name: 'Ceiling Vector',
       desc: 'MUTATED: Wall-kicking allows running upside down along skyscraper underhangs.',
       stats: { jump: 1.4 },
+    },
+  ],
+  chrono_stasis_4: [
+    {
+      name: 'Quantum Entanglement',
+      desc: 'MUTATED: Frozen enemies explode on contact, chaining the freeze.',
+      stats: { damage: 1.3 },
+    },
+  ],
+  vector_orbit_4: [
+    {
+      name: 'Orbital Barrage',
+      desc: 'MUTATED: Debris pieces fire back at enemies like homing missiles.',
+      stats: { damage: 1.4 },
     },
   ],
 };

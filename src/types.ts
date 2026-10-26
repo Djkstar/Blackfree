@@ -4,7 +4,7 @@
 
 export type OriginType = 'chrono' | 'vector';
 
-export type WeaponId = 'katana' | 'rifle' | 'revolver' | 'shotgun';
+export type WeaponId = 'katana' | 'rifle' | 'revolver' | 'shotgun' | 'smg' | 'railgun' | 'throwing_knives';
 
 export interface WeaponDef {
   id: WeaponId;
@@ -19,6 +19,8 @@ export interface WeaponDef {
   pellets?: number;
   spread?: number;
   accentColor: string;
+  isAutomatic?: boolean;
+  projectileSpeed?: number;
 }
 
 export type StyleRank = 'FRESH' | 'CARNAGE' | 'BRUTAL' | 'ANOMALOUS' | 'SUPREME' | 'ULTRAKILL';

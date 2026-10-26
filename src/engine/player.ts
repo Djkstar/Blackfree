@@ -11,6 +11,7 @@ import { sound } from './audio.ts';
 
 export interface AbilityExecutionResult {
   executedAbilityName: string | null;
+  executedAbilityEffect: string | null;
   triggerGroundSlam: boolean;
   triggerSingularity: boolean;
   triggerSwarm: boolean;
@@ -116,6 +117,7 @@ export class PlayerController {
   ): AbilityExecutionResult {
     const result: AbilityExecutionResult = {
       executedAbilityName: null,
+      executedAbilityEffect: null,
       triggerGroundSlam: false,
       triggerSingularity: false,
       triggerSwarm: false,
@@ -289,6 +291,7 @@ export class PlayerController {
       const ability = gacha.triggerSlot(triggeredSlot);
       if (ability) {
         result.executedAbilityName = ability.name;
+        result.executedAbilityEffect = ability.executeEffect;
         this.executeAbility(ability.executeEffect, forward, result);
       }
     }

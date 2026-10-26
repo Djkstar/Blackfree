@@ -60,6 +60,44 @@ export const WEAPON_REGISTRY: Record<WeaponId, WeaponDef> = {
     spread: 0.07,
     accentColor: '#8B5CF6',
   },
+  smg: {
+    id: 'smg',
+    name: 'Phantom SMG',
+    type: 'hitscan',
+    damage: 12,
+    fireRate: 0.065,
+    magSize: 45,
+    reloadTime: 1.1,
+    recoil: 0.025,
+    range: 65,
+    accentColor: '#10b981',
+    isAutomatic: true,
+  },
+  railgun: {
+    id: 'railgun',
+    name: 'Axiom Rail Cannon',
+    type: 'hitscan',
+    damage: 210,
+    fireRate: 2.2,
+    magSize: 1,
+    reloadTime: 2.8,
+    recoil: 0.5,
+    range: 500,
+    accentColor: '#a78bfa',
+    projectileSpeed: 400,
+  },
+  throwing_knives: {
+    id: 'throwing_knives',
+    name: 'Phase Blades',
+    type: 'projectile',
+    damage: 65,
+    fireRate: 0.3,
+    magSize: 6,
+    reloadTime: 0.9,
+    recoil: 0.05,
+    range: 60,
+    accentColor: '#f43f5e',
+  },
 };
 
 export class WeaponSystem {
@@ -69,6 +107,9 @@ export class WeaponSystem {
     rifle: 32,
     revolver: 6,
     shotgun: 8,
+    smg: 45,
+    railgun: 1,
+    throwing_knives: 6,
   };
   public isReloading: boolean = false;
   public reloadTimer: number = 0;
@@ -263,6 +304,73 @@ export class WeaponSystem {
     shotgunGroup.position.set(0.24, -0.26, -0.45);
     this.viewmodelContainer.add(shotgunGroup);
     this.weaponMeshes.set('shotgun', shotgunGroup);
+
+    // 5. PHANTOM SMG VIEWMODEL
+    const smgGroup = new THREE.Group();
+    const smgRecGeo = new THREE.BoxGeometry(0.055, 0.09, 0.38);
+    const smgRecMat = new THREE.MeshStandardMaterial({ color: 0x064e3b, metalness: 0.85, roughness: 0.2, emissive: 0x065f46, emissiveIntensity: 0.15 });
+    const smgRec = new THREE.Mesh(smgRecGeo, smgRecMat);
+    smgGroup.add(smgRec);
+    const smgBarrelGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.3, 10);
+    const smgBarrelMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.9, roughness: 0.15 });
+    const smgBarrel = new THREE.Mesh(smgBarrelGeo, smgBarrelMat);
+    smgBarrel.rotation.x = Math.PI / 2;
+    smgBarrel.position.set(0, 0.02, -0.33);
+    smgGroup.add(smgBarrel);
+    const smgGripGeo = new THREE.BoxGeometry(0.04, 0.16, 0.06);
+    const smgGripMat = new THREE.MeshStandardMaterial({ color: 0x022c22, roughness: 0.85 });
+    const smgGrip = new THREE.Mesh(smgGripGeo, smgGripMat);
+    smgGrip.position.set(0, -0.12, 0.06);
+    smgGrip.rotation.x = -0.3;
+    smgGroup.add(smgGrip);
+    const smgAccentGeo = new THREE.BoxGeometry(0.058, 0.012, 0.36);
+    const smgAccentMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
+    const smgAccent = new THREE.Mesh(smgAccentGeo, smgAccentMat);
+    smgAccent.position.set(0, 0.052, 0);
+    smgGroup.add(smgAccent);
+    smgGroup.position.set(0.22, -0.22, -0.44);
+    this.viewmodelContainer.add(smgGroup);
+    this.weaponMeshes.set('smg', smgGroup);
+
+    // 6. AXIOM RAIL CANNON VIEWMODEL
+    const railGroup = new THREE.Group();
+    const railBarrelGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.9, 14);
+    const railBarrelMat = new THREE.MeshStandardMaterial({ color: 0x1e1b4b, metalness: 0.95, roughness: 0.1, emissive: 0x4c1d95, emissiveIntensity: 0.3 });
+    const railBarrel = new THREE.Mesh(railBarrelGeo, railBarrelMat);
+    railBarrel.rotation.x = Math.PI / 2;
+    railBarrel.position.set(0, 0, -0.38);
+    railGroup.add(railBarrel);
+    const coilMat = new THREE.MeshBasicMaterial({ color: 0xa78bfa });
+    for (let ci = 0; ci < 3; ci++) {
+      const coilGeo = new THREE.TorusGeometry(0.055, 0.01, 8, 16);
+      const coil = new THREE.Mesh(coilGeo, coilMat);
+      coil.rotation.y = Math.PI / 2;
+      coil.position.set(0, 0, -0.15 - ci * 0.22);
+      railGroup.add(coil);
+    }
+    const railBodyGeo = new THREE.BoxGeometry(0.1, 0.11, 0.4);
+    const railBodyMat = new THREE.MeshStandardMaterial({ color: 0x0f0a1e, metalness: 0.9, roughness: 0.2 });
+    const railBody = new THREE.Mesh(railBodyGeo, railBodyMat);
+    railBody.position.set(0, 0, 0.06);
+    railGroup.add(railBody);
+    railGroup.position.set(0.24, -0.24, -0.48);
+    this.viewmodelContainer.add(railGroup);
+    this.weaponMeshes.set('railgun', railGroup);
+
+    // 7. PHASE BLADES (THROWING KNIVES) VIEWMODEL
+    const knivesGroup = new THREE.Group();
+    const bladeMat2 = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.95, roughness: 0.05, emissive: 0xf43f5e, emissiveIntensity: 0.35 });
+    for (let ki = 0; ki < 3; ki++) {
+      const kGeo = new THREE.BoxGeometry(0.01, 0.08, 0.22);
+      const k = new THREE.Mesh(kGeo, bladeMat2);
+      k.position.set((ki - 1) * 0.04, -0.01 + ki * 0.01, -0.14);
+      k.rotation.z = (ki - 1) * 0.2;
+      knivesGroup.add(k);
+    }
+    knivesGroup.position.set(0.20, -0.28, -0.42);
+    knivesGroup.rotation.set(-0.1, 0.2, -0.1);
+    this.viewmodelContainer.add(knivesGroup);
+    this.weaponMeshes.set('throwing_knives', knivesGroup);
   }
 
   public switchWeapon(id: WeaponId): void {
@@ -304,9 +412,10 @@ export class WeaponSystem {
 
     // Firearms
     this.ammo[this.currentWeaponId]--;
-    if (this.currentWeaponId === 'rifle') sound.playRifleShot();
-    else if (this.currentWeaponId === 'revolver') sound.playRevolverShot();
+    if (this.currentWeaponId === 'rifle' || this.currentWeaponId === 'smg') sound.playRifleShot();
+    else if (this.currentWeaponId === 'revolver' || this.currentWeaponId === 'railgun') sound.playRevolverShot();
     else if (this.currentWeaponId === 'shotgun') sound.playShotgunShot();
+    else if (this.currentWeaponId === 'throwing_knives') sound.playKatanaSwing();
 
     // Trigger visual muzzle flash
     this.muzzleFlashLight.intensity = 2.5;
@@ -406,6 +515,9 @@ export class WeaponSystem {
       case 'rifle': return new THREE.Vector3(0.24, -0.24, -0.45);
       case 'revolver': return new THREE.Vector3(0.22, -0.22, -0.42);
       case 'shotgun': return new THREE.Vector3(0.24, -0.26, -0.45);
+      case 'smg': return new THREE.Vector3(0.22, -0.22, -0.44);
+      case 'railgun': return new THREE.Vector3(0.24, -0.24, -0.48);
+      case 'throwing_knives': return new THREE.Vector3(0.20, -0.28, -0.42);
     }
   }
 

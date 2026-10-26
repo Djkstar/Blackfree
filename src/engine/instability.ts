@@ -40,9 +40,10 @@ export class InstabilityDirector {
     this.instability = Math.min(100, this.instability + amount);
   }
 
-  public update(dt: number): { triggerApexSpawn: boolean; triggerSystemWipe: boolean } {
+  public update(dt: number, playerPos: THREE.Vector3): { triggerApexSpawn: boolean; triggerSystemWipe: boolean; tearDamage: number } {
     let triggerApexSpawn = false;
     let triggerSystemWipe = false;
+    let tearDamageTotal = 0;
 
     // Natural background entropy accumulation
     this.instability = Math.min(100, this.instability + dt * 0.85);
@@ -79,6 +80,14 @@ export class InstabilityDirector {
       const scale = 1 + Math.sin(tear.life * 6) * 0.2;
       tear.mesh.scale.set(scale, scale, scale);
 
+      // Proximity damage after 1s grace period
+      if (tear.life > 1.0) {
+        const distToTear = playerPos.distanceTo(tear.position);
+        if (distToTear < tear.radius * 1.8) {
+          tearDamageTotal += 8 * dt;
+        }
+      }
+
       if (tear.life >= tear.maxLife) {
         this.destroyTear(i);
       }
@@ -99,7 +108,7 @@ export class InstabilityDirector {
       }
     }
 
-    return { triggerApexSpawn, triggerSystemWipe };
+    return { triggerApexSpawn, triggerSystemWipe, tearDamage: tearDamageTotal };
   }
 
   public spawnSpatialTear(position: THREE.Vector3): SpatialTear {

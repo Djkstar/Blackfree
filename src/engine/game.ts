@@ -263,6 +263,9 @@ export class GameEngine {
     if (this.input.isJustPressed('Digit2')) this.weapons.switchWeapon('rifle');
     if (this.input.isJustPressed('Digit3')) this.weapons.switchWeapon('revolver');
     if (this.input.isJustPressed('Digit4')) this.weapons.switchWeapon('shotgun');
+    if (this.input.isJustPressed('Digit5')) this.weapons.switchWeapon('smg');
+    if (this.input.isJustPressed('Digit6')) this.weapons.switchWeapon('railgun');
+    if (this.input.isJustPressed('Digit7')) this.weapons.switchWeapon('throwing_knives');
     if (mouseDelta.wheel > 20) this.cycleNextWeapon();
     if (mouseDelta.wheel < -20) this.cyclePrevWeapon();
 
@@ -327,6 +330,52 @@ export class GameEngine {
       this.spawnRepulsorShockwave(this.player.position);
     }
 
+    // New ability effects
+    if (abilityExec.executedAbilityEffect) {
+      const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+      switch (abilityExec.executedAbilityEffect) {
+        case 'phase_sprint':
+          this.player.velocity.x *= 3;
+          this.player.velocity.z *= 3;
+          this.player.isInvulnerable = true;
+          this.player.invulnerableTimer = 3.0;
+          this.addFloatingText('PHASE SPRINT!', this.player.position, '#06b6d4');
+          break;
+        case 'stasis_grenade':
+          this.ai.units.forEach(u => {
+            if (u.position.distanceTo(this.player.position) < 10) {
+              u.state = 'roam';
+              u.jobTimer = 3.5;
+            }
+          });
+          this.spawnParticleBurst(this.player.position, 0x06b6d4, 24);
+          this.addFloatingText('STASIS!', this.player.position, '#06b6d4');
+          break;
+        case 'debris_orbit':
+          this.instability.instability = Math.max(0, this.instability.instability - 15);
+          this.player.addStylePoints(500);
+          this.addFloatingText('DEBRIS ORBIT!', this.player.position, '#8b5cf6');
+          break;
+        case 'echo_self': {
+          const echoPos = this.player.position.clone().add(new THREE.Vector3(2, 0, 0));
+          const echo = this.ai.spawnCitizen('anomaly_hunter', 'ally', echoPos, 'Echo_Clone');
+          // Echo dissolves after 8s by setting a short maxHealth timer via jobTimer
+          echo.jobTimer = 8.0;
+          this.addFloatingText('ECHO DEPLOYED!', this.player.position, '#38bdf8');
+          break;
+        }
+        case 'gravity_slingshot':
+          this.player.velocity.addScaledVector(lookDir, 85);
+          this.addFloatingText('SLINGSHOT!', this.player.position, '#a78bfa');
+          break;
+      }
+    }
+
+    // Observe player wall-run
+    if (this.player.isWallRunning) {
+      this.ai.observePlayerAction('wall_run', this.player.position);
+    }
+
     // Weapons viewmodel update
     const speedMult = this.player.isOverdriveActive ? 2.8 : 1.0;
     this.weapons.update(dt * speedMult, mouseDelta.dx, mouseDelta.dy, isMoving, this.player.moveTime);
@@ -377,7 +426,10 @@ export class GameEngine {
     }
 
     // Instability
-    const instResult = this.instability.update(dt);
+    const instResult = this.instability.update(dt, this.player.position);
+    if (instResult.tearDamage > 0) {
+      this.player.takeDamage(instResult.tearDamage);
+    }
     if (instResult.triggerApexSpawn && this.ai.units.length < 8) {
       const spawnP = new THREE.Vector3((Math.random() - 0.5) * 40, 28, (Math.random() - 0.5) * 40);
       this.ai.spawnCitizen('anomaly_hunter', 'nemesis', spawnP, 'Apex_Anomaly');
@@ -445,6 +497,7 @@ export class GameEngine {
         this.addFloatingText('+ PARRY!', this.player.position, '#38bdf8');
         this.screenShakeIntensity = 0.45;
         this.addCityEvent('Frame-perfect Katana Parry reflected!', 'combat');
+        this.ai.observePlayerAction('parry', this.player.position);
       }
 
       for (const unit of this.ai.units) {

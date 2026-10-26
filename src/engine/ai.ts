@@ -51,6 +51,8 @@ export interface AIUnit {
   hitFlashTimer: number;
   accentColor: number;
   pet: CyberPet | null;
+  learnedBehaviors: Set<'wall_run' | 'bullet_climb' | 'strafe_dodge' | 'flank'>;
+  observationScore: number;
 }
 
 const NPC_NAMES = [
@@ -123,7 +125,32 @@ export class AIManager {
       stats.canWallRun = true;
     });
 
+    // Generation 2+: all units learn bullet_climb
+    if (this.currentGeneration >= 2) {
+      this.units.forEach(u => u.learnedBehaviors.add('bullet_climb'));
+      (Object.keys(this.baseStats) as NPCOccupation[]).forEach(k => { this.baseStats[k].canBulletClimb = true; });
+    }
+    // Generation 3+: all units learn flank
+    if (this.currentGeneration >= 3) {
+      this.units.forEach(u => u.learnedBehaviors.add('flank'));
+    }
+
     this.addChat('SYSTEM', `AI Network Generational Evolution ${this.currentGeneration} synchronized across Sector-07.`, 'neutral');
+  }
+
+  public observePlayerAction(actionType: 'wall_run' | 'parkour' | 'parry', playerPos: THREE.Vector3): void {
+    this.units.forEach(u => {
+      if (u.position.distanceTo(playerPos) < 25) {
+        u.observationScore += 15;
+        if (u.observationScore >= 100) {
+          u.observationScore = 0;
+          if (actionType === 'wall_run') u.learnedBehaviors.add('wall_run');
+          else if (actionType === 'parry') u.learnedBehaviors.add('strafe_dodge');
+          else u.learnedBehaviors.add('flank');
+          this.triggerSpeech(u, `Adapting behavioral matrix: ${actionType} pattern acquired!`);
+        }
+      }
+    });
   }
 
   public spawnCitizen(
@@ -238,6 +265,8 @@ export class AIManager {
       hitFlashTimer: 0,
       accentColor,
       pet,
+      learnedBehaviors: new Set(),
+      observationScore: 0,
     };
 
     this.units.push(unit);
@@ -454,6 +483,25 @@ export class AIManager {
               const strafe = new THREE.Vector3(-dir.z, 0, dir.x);
               unit.velocity.x = strafe.x * stats.speed * 0.7;
               unit.velocity.z = strafe.z * stats.speed * 0.7;
+            }
+
+            // Bullet-climb: jump toward elevated nearby projectiles as climbing footholds
+            if (unit.learnedBehaviors.has('bullet_climb') && projectiles.projectiles.length > 0) {
+              const nearbyProj = projectiles.projectiles.find(p => p.position.distanceTo(unit.position) < 8 && !p.isPlayerOwned);
+              if (nearbyProj && nearbyProj.position.y > unit.position.y + 1.5) {
+                unit.velocity.y = Math.max(unit.velocity.y, 12);
+              }
+            }
+
+            // Flank: approach from perpendicular angle when close
+            if (unit.learnedBehaviors.has('flank') && dist < 15 && targetPos) {
+              const perp = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(unit.id.charCodeAt(4) % 2 === 0 ? 8 : -8);
+              const flankTarget = targetPos.clone().add(perp);
+              const toFlank = flankTarget.sub(unit.position);
+              toFlank.y = 0;
+              const flankDir = toFlank.normalize();
+              unit.velocity.x = flankDir.x * stats.speed;
+              unit.velocity.z = flankDir.z * stats.speed;
             }
 
             unit.attackCooldown -= effectiveDt;
