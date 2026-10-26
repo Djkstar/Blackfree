@@ -456,6 +456,56 @@ class SoundEngine {
     osc.start(now);
     osc.stop(now + 0.61);
   }
+
+  /** Electrical Arc / Faulty Neon Transformer Spark */
+  public playElectricalSpark(): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(2400 + Math.random() * 1200, now);
+    osc.frequency.exponentialRampToValueAtTime(300, now + 0.06);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(3200, now);
+    filter.Q.setValueAtTime(3.0, now);
+
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(now);
+    osc.stop(now + 0.07);
+  }
+
+  /** Transformer Voltage Surge & Neon Buzz */
+  public playTransformerSurge(): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(60, now);
+    osc.frequency.linearRampToValueAtTime(180, now + 0.1);
+    osc.frequency.linearRampToValueAtTime(60, now + 0.22);
+
+    gain.gain.setValueAtTime(0.22, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.23);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(now);
+    osc.stop(now + 0.24);
+  }
 }
 
 export const sound = new SoundEngine();

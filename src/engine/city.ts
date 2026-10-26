@@ -45,8 +45,14 @@ export class CityManager {
   private steamVents: THREE.Vector3[] = [];
   private steamPuffs: SteamPuff[] = [];
   private steamGroup: THREE.Group;
-  private animatedMaterials: THREE.MeshBasicMaterial[] = [];
   private steamSpawnTimer: number = 0;
+  public neonFixtures: {
+    worldPos: THREE.Vector3;
+    material: THREE.MeshBasicMaterial;
+    baseColor: THREE.Color;
+    baseOpacity: number;
+    flickerTimer: number;
+  }[] = [];
 
   // Cached Textures
   private cyanTowerTexture: THREE.CanvasTexture;
