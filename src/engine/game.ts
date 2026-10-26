@@ -370,6 +370,7 @@ export class GameEngine {
     if (abilityExec.executedAbilityName) {
       this.addFloatingText(abilityExec.executedAbilityName.toUpperCase(), this.player.position, '#38bdf8');
       this.addCityEvent(`${abilityExec.executedAbilityName} unleashed!`, 'combat');
+      sound.playAbilityActivate();
     }
 
     if (abilityExec.triggerDecoy && abilityExec.decoyPosition) {
@@ -440,6 +441,7 @@ export class GameEngine {
     // Observe player wall-run
     if (this.player.isWallRunning) {
       this.ai.observePlayerAction('wall_run', this.player.position);
+      sound.playWallRunSlide();
     }
 
     // Weapons viewmodel update
@@ -528,6 +530,7 @@ export class GameEngine {
     const instResult = this.instability.update(dt, this.player.position);
     if (instResult.tearDamage > 0) {
       this.player.takeDamage(instResult.tearDamage);
+      sound.playTearProximity(dt);
     }
     if (instResult.triggerApexSpawn && this.ai.units.length < 8) {
       const spawnP = new THREE.Vector3((Math.random() - 0.5) * 40, 28, (Math.random() - 0.5) * 40);
@@ -679,6 +682,7 @@ export class GameEngine {
       }
 
       this.screenShakeIntensity = attackResult.def.id === 'revolver' ? 0.35 : 0.15;
+      if (attackResult.def.id === 'railgun') sound.playRailgunCharge();
     }
   }
 

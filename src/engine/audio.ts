@@ -11,7 +11,9 @@ class SoundEngine {
   private isMuted: boolean = false;
   private droneOscs: OscillatorNode[] = [];
   private droneFilter: BiquadFilterNode | null = null;
+  private droneLFO: OscillatorNode | null = null;
   private isDroneActive: boolean = false;
+  private tearProximityTimer: number = 0;
 
   public init(): void {
     if (this.ctx) {
@@ -62,13 +64,24 @@ class SoundEngine {
     this.droneFilter.frequency.setValueAtTime(280, this.ctx.currentTime);
     this.droneFilter.connect(this.musicGain);
 
+    // Sub-bass foundation (28Hz felt, not heard)
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(28, this.ctx.currentTime);
+    subGain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+    subOsc.connect(subGain);
+    subGain.connect(this.droneFilter);
+    subOsc.start();
+    this.droneOscs.push(subOsc);
+
     // Deep dark synth drone (D minor / A / F bass layers)
     const freqs = [55, 73.42, 110, 146.83];
     freqs.forEach((freq, idx) => {
       if (!this.ctx || !this.droneFilter) return;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
-      
+
       osc.type = idx % 2 === 0 ? 'sawtooth' : 'triangle';
       osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
 
@@ -82,6 +95,16 @@ class SoundEngine {
       osc.start();
       this.droneOscs.push(osc);
     });
+
+    // LFO filter sweep (0.08Hz) for slow ominous breathing
+    this.droneLFO = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    this.droneLFO.type = 'sine';
+    this.droneLFO.frequency.setValueAtTime(0.08, this.ctx.currentTime);
+    lfoGain.gain.setValueAtTime(400, this.ctx.currentTime);
+    this.droneLFO.connect(lfoGain);
+    lfoGain.connect(this.droneFilter.frequency);
+    this.droneLFO.start();
   }
 
   /** Time Dilation effect (drops music cutoff and pitches down) */
@@ -505,6 +528,171 @@ class SoundEngine {
 
     osc.start(now);
     osc.stop(now + 0.24);
+  }
+
+  /** Footstep impact — concrete thud */
+  public playFootstep(): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(90, now);
+    osc.frequency.exponentialRampToValueAtTime(35, now + 0.06);
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.08);
+  }
+
+  /** Jump launch — upward kinetic burst */
+  public playJumpLaunch(): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(520, now + 0.09);
+
+    gain.gain.setValueAtTime(0.28, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+
+    // Airy noise layer
+    const bufSize = Math.floor(this.ctx.sampleRate * 0.09);
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buf;
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.12, now);
+    noise.connect(noiseGain);
+    noiseGain.connect(this.sfxGain);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.12);
+    noise.start(now);
+  }
+
+  /** Wall-run slide — high-frequency scrape */
+  public playWallRunSlide(): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    const bufSize = Math.floor(this.ctx.sampleRate * 0.2);
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) d[i] = (Math.random() * 2 - 1) * Math.sin((i / bufSize) * Math.PI);
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buf;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(3200, now);
+    filter.frequency.linearRampToValueAtTime(1800, now + 0.2);
+    filter.Q.setValueAtTime(4, now);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.22, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    noise.start(now);
+  }
+
+  /** Ability activation — crystalline energy pulse */
+  public playAbilityActivate(): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    const freqs = [880, 1320, 1760];
+    freqs.forEach((freq, i) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq * 0.75, now + i * 0.04);
+      osc.frequency.exponentialRampToValueAtTime(freq, now + i * 0.04 + 0.08);
+      gain.gain.setValueAtTime(0.22 / (i + 1), now + i * 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.04 + 0.35);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now + i * 0.04);
+      osc.stop(now + i * 0.04 + 0.36);
+    });
+  }
+
+  /** Spatial tear proximity — low rumble with distortion (throttled) */
+  public playTearProximity(dt: number): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    this.tearProximityTimer -= dt;
+    if (this.tearProximityTimer > 0) return;
+    this.tearProximityTimer = 0.4; // play at most once per 400ms
+
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const distortion = this.ctx.createWaveShaper();
+
+    // Simple hard-clip distortion curve
+    const curve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) {
+      const x = (i * 2) / 256 - 1;
+      curve[i] = Math.tanh(x * 6);
+    }
+    distortion.curve = curve;
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(42, now);
+    osc.frequency.linearRampToValueAtTime(38, now + 0.35);
+
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+    osc.connect(distortion);
+    distortion.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.36);
+  }
+
+  /** Railgun charge — rising electromagnetic whine */
+  public playRailgunCharge(): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(120, now);
+    osc.frequency.exponentialRampToValueAtTime(3800, now + 0.55);
+
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.linearRampToValueAtTime(0.38, now + 0.5);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1200, now);
+    filter.frequency.exponentialRampToValueAtTime(4000, now + 0.55);
+    filter.Q.setValueAtTime(6, now);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.59);
   }
 }
 
