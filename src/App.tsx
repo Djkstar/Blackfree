@@ -76,7 +76,7 @@ export default function App() {
       const engine = new GameEngine(mountRef.current, origin);
       engineRef.current = engine;
 
-      engine.onStateUpdate = (newStats, player, weapons, _gacha, units, locked) => {
+      engine.onStateUpdate = (newStats, player, weapons, _gacha, units, locked, _social) => {
         setStats({ ...newStats });
         setPlayerVitals({
           health: player.health,
@@ -282,6 +282,7 @@ export default function App() {
           playerPos={playerVitals.pos}
           cityEvents={cityEvents}
           mutationAlert={mutationAlert}
+          social={engineRef.current.ai.social}
           isPointerLocked={isPointerLocked}
           onLockPointer={handleLockPointer}
           onOpenGacha={() => {

@@ -88,6 +88,29 @@ const JOB_SPEECH: Record<NPCOccupation, string[]> = {
   ],
 };
 
+export const SKIRMISH_SPEECH: Record<FactionId, string[]> = {
+  syndicate: [
+    'Secure the payload! Sector-07 belongs to the Syndicate!',
+    'Neon Syndicate never yields territory!',
+    'Liquidate their assets! Drive them off the roof!',
+  ],
+  wardens: [
+    'Axiom Protocols initiated: Neutralize unauthorized faction!',
+    'Hold the perimeter! Timeline integrity depends on Axiom!',
+    'Order will prevail over rogue anomaly networks!',
+  ],
+  glitch_collective: [
+    'Overclocking anomaly harmonics! Data belongs to everyone!',
+    'Execute sub-routine: Eradicate opposing firewall!',
+    'The Collective expands! Code will not be bound!',
+  ],
+  drifters: [
+    'Keep moving, Drifters! Clear the skyline!',
+    'High-velocity breach! Rooftops belong to the free!',
+    'Strike fast and slip the net!',
+  ],
+};
+
 export class AIManager {
   public group: THREE.Group;
   public units: AIUnit[] = [];
@@ -353,6 +376,41 @@ export class AIManager {
       }
     }
 
+    // 2. Dynamic Skirmish Reinforcements & Mobilization
+    for (const sk of this.social.activeSkirmishes) {
+      if (sk.status !== 'active') continue;
+      if (this.units.length >= 13) continue;
+
+      const unitsA = this.units.filter((u) => u.faction === sk.factionA);
+      const unitsB = this.units.filter((u) => u.faction === sk.factionB);
+
+      if (unitsA.length < 2) {
+        const angle = Math.random() * Math.PI * 2;
+        const spawnP = new THREE.Vector3(
+          sk.position[0] + Math.cos(angle) * (sk.radius * 0.65),
+          sk.position[1] + 2,
+          sk.position[2] + Math.sin(angle) * (sk.radius * 0.65)
+        );
+        const occ: NPCOccupation = sk.factionA === 'wardens' ? 'enforcer' : sk.factionA === 'syndicate' ? 'syndicate_merc' : 'netrunner';
+        const unit = this.spawnCitizen(occ, 'neutral', spawnP, undefined, sk.factionA);
+        unit.state = 'chase';
+        this.triggerSpeech(unit, `Mobilizing to defend ${sk.locationName}!`);
+      }
+
+      if (unitsB.length < 2) {
+        const angle = Math.random() * Math.PI * 2;
+        const spawnP = new THREE.Vector3(
+          sk.position[0] + Math.cos(angle) * (sk.radius * 0.65),
+          sk.position[1] + 2,
+          sk.position[2] + Math.sin(angle) * (sk.radius * 0.65)
+        );
+        const occ: NPCOccupation = sk.factionB === 'wardens' ? 'enforcer' : sk.factionB === 'syndicate' ? 'syndicate_merc' : 'courier';
+        const unit = this.spawnCitizen(occ, 'neutral', spawnP, undefined, sk.factionB);
+        unit.state = 'chase';
+        this.triggerSpeech(unit, `Assaulting ${sk.locationName}! Breach line!`);
+      }
+    }
+
     for (let i = this.units.length - 1; i >= 0; i--) {
       const unit = this.units[i];
       const effectiveDt = dt * timeDilationFactor;
@@ -398,7 +456,7 @@ export class AIManager {
         unit.mesh.rotation.y = THREE.MathUtils.damp(unit.mesh.rotation.y, targetAngle, 8, effectiveDt);
       }
 
-      // 2. Faction Dynamics & Inter-NPC Conflict Targeting:
+      // 3. Faction Dynamics & Inter-NPC Conflict Targeting:
       let targetPos: THREE.Vector3 | null = null;
       let targetIsPlayer = false;
 
@@ -418,20 +476,54 @@ export class AIManager {
         const threat = this.units.find((u) => u.relationship === 'nemesis' || u.occupation === 'anomaly_hunter');
         if (threat) targetPos = threat.position;
       } else {
-        // Dynamic Faction Warfare: Attack units belonging to enemy factions if nearby
-        const factionDef = this.social.factions[unit.faction];
-        const enemyFactionUnit = this.units.find(
-          (other) =>
-            other !== unit &&
-            (factionDef.enemies.includes(other.faction) || this.social.getTrust(unit.id, other.id) < -15) &&
-            unit.position.distanceTo(other.position) < 26
+        // Dynamic Skirmish Priority Targeting
+        const activeSkirmishForUnit = this.social.activeSkirmishes.find(
+          (sk) => sk.status === 'active' && (sk.factionA === unit.faction || sk.factionB === unit.faction)
         );
 
-        if (enemyFactionUnit) {
-          targetPos = enemyFactionUnit.position;
-        } else if (unit.relationship === 'rival' && distToPlayer < 10) {
-          targetPos = playerPos;
-          targetIsPlayer = true;
+        if (activeSkirmishForUnit) {
+          const enemyFaction = activeSkirmishForUnit.factionA === unit.faction
+            ? activeSkirmishForUnit.factionB
+            : activeSkirmishForUnit.factionA;
+
+          // Find enemy skirmisher within 38m
+          const enemySkirmisher = this.units.find(
+            (other) => other !== unit && other.faction === enemyFaction && unit.position.distanceTo(other.position) < 38
+          );
+
+          if (enemySkirmisher) {
+            targetPos = enemySkirmisher.position;
+            if (Math.random() < 0.003 && unit.speechTimer <= 0) {
+              const speechLines = SKIRMISH_SPEECH[unit.faction] || [];
+              if (speechLines.length > 0) {
+                this.triggerSpeech(unit, speechLines[Math.floor(Math.random() * speechLines.length)]);
+              }
+            }
+          } else {
+            // Move toward skirmish arena center
+            const skCenter = new THREE.Vector3(...activeSkirmishForUnit.position);
+            if (unit.position.distanceTo(skCenter) > 6.0) {
+              targetPos = skCenter;
+            }
+          }
+        }
+
+        // Standard Rival / Enemy Faction Warfare if not in active skirmish target
+        if (!targetPos) {
+          const factionDef = this.social.factions[unit.faction];
+          const enemyFactionUnit = this.units.find(
+            (other) =>
+              other !== unit &&
+              (factionDef.enemies.includes(other.faction) || this.social.getTrust(unit.id, other.id) < -15) &&
+              unit.position.distanceTo(other.position) < 26
+          );
+
+          if (enemyFactionUnit) {
+            targetPos = enemyFactionUnit.position;
+          } else if (unit.relationship === 'rival' && distToPlayer < 10) {
+            targetPos = playerPos;
+            targetIsPlayer = true;
+          }
         }
       }
 
@@ -651,23 +743,39 @@ export class AIManager {
   public damageCitizen(
     unit: AIUnit,
     damage: number,
-    knockback: THREE.Vector3
+    knockback: THREE.Vector3,
+    attackerFaction: FactionId | 'player' = 'player'
   ): { killed: boolean; shardReward: number } {
     unit.health -= damage;
     unit.velocity.add(knockback);
 
-    this.social.modifyTrust(unit.id, 'player', -35);
-    this.social.modifyPlayerReputation(unit.faction, -20);
+    const isPlayer = attackerFaction === 'player';
+    if (isPlayer) {
+      this.social.modifyTrust(unit.id, 'player', -35);
+      this.social.modifyPlayerReputation(unit.faction, -20);
 
-    if (unit.relationship === 'ally' || unit.relationship === 'neutral') {
-      unit.relationship = 'nemesis';
-      this.triggerSpeech(unit, 'Traitor! You turned your weapons on me!');
+      if (unit.relationship === 'ally' || unit.relationship === 'neutral') {
+        unit.relationship = 'nemesis';
+        this.triggerSpeech(unit, 'Traitor! You turned your weapons on me!');
+      }
     }
 
     (unit.visorMesh.material as THREE.MeshBasicMaterial).color.setHex(0xffffff);
     unit.hitFlashTimer = 0.08;
 
-    if (unit.health <= 0) {
+    const killed = unit.health <= 0;
+
+    // Report to Skirmish Director
+    this.social.recordSkirmishCombat(
+      attackerFaction as any,
+      unit.faction,
+      damage,
+      isPlayer,
+      killed,
+      [unit.position.x, unit.position.y, unit.position.z]
+    );
+
+    if (killed) {
       this.destroyCitizen(unit);
       return {
         killed: true,

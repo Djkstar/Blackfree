@@ -7,6 +7,7 @@ import { GameStats, MutationAlert, WeaponId, CityEvent } from '../types.ts';
 import { WEAPON_REGISTRY } from '../engine/weapons.ts';
 import { GachaManager } from '../engine/gacha.ts';
 import { AIUnit } from '../engine/ai.ts';
+import { SocialInteractionEngine } from '../engine/social.ts';
 
 interface HUDProps {
   stats: GameStats;
@@ -23,6 +24,7 @@ interface HUDProps {
   playerPos?: { x: number; y: number; z: number };
   cityEvents: CityEvent[];
   mutationAlert: MutationAlert | null;
+  social?: SocialInteractionEngine;
   isPointerLocked: boolean;
   onLockPointer: () => void;
   onOpenGacha: () => void;
@@ -47,6 +49,7 @@ export const HUD: React.FC<HUDProps> = ({
   playerPos,
   cityEvents,
   mutationAlert,
+  social,
   isPointerLocked,
   onLockPointer,
   onOpenGacha,
@@ -83,6 +86,23 @@ export const HUD: React.FC<HUDProps> = ({
   };
 
   const speakingCitizens = aiUnits.filter((u) => u.speechText !== null);
+
+  // Active Skirmish calculations
+  const activeSkirmish = social?.activeSkirmishes.find((s) => s.status === 'active') || social?.activeSkirmishes[0];
+  let skirmishDist = 0;
+  let skirmishBearing = 'N';
+  if (activeSkirmish && playerPos) {
+    const dx = activeSkirmish.position[0] - playerPos.x;
+    const dz = activeSkirmish.position[2] - playerPos.z;
+    skirmishDist = Math.round(Math.sqrt(dx * dx + dz * dz));
+    const angle = (Math.atan2(dx, -dz) * (180 / Math.PI) + 360) % 360;
+    skirmishBearing = getCardinal(angle);
+  }
+
+  const factionAInfo = activeSkirmish && social ? social.factions[activeSkirmish.factionA] : null;
+  const factionBInfo = activeSkirmish && social ? social.factions[activeSkirmish.factionB] : null;
+  const totalPlayerContribution = activeSkirmish ? activeSkirmish.playerContributionA + activeSkirmish.playerContributionB : 0;
+  const factions = social ? social.factions : null;
 
   // Proximity interaction calculation
   const nearestCitizen = playerPos
@@ -142,18 +162,135 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         </div>
 
-        {/* Center: Live City Broadcast Ticker */}
-        <div className="hidden lg:flex flex-col items-center max-w-lg w-full">
-          {cityEvents.length > 0 && (
-            <div className="bg-slate-950/90 border border-slate-800 px-4 py-1.5 flex items-center gap-3 text-xs w-full justify-center shadow-lg">
-              <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest">SECTOR FEED //</span>
-              <span className="text-slate-200 truncate">{cityEvents[0].text}</span>
+        {/* Center: Global Faction Influence & Active Skirmish Tracker */}
+        <div className="hidden lg:flex flex-col items-center max-w-xl w-full gap-2">
+          {/* Global Faction Influence Multi-Segment Bar */}
+          {factions && (
+            <div className="bg-slate-950/90 border border-slate-800 p-2 w-full shadow-lg">
+              <div className="flex items-center justify-between text-[10px] mb-1">
+                <span className="text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block" />
+                  GLOBAL FACTION INFLUENCE
+                </span>
+                <span className="text-[9px] text-slate-500 uppercase">SECTOR-07 DOMINANCE</span>
+              </div>
+
+              {/* Faction Percentages Header */}
+              <div className="grid grid-cols-4 gap-1 text-[10px] mb-1 font-semibold">
+                <div className="flex items-center gap-1 truncate text-amber-400">
+                  <span className="w-2 h-2 rounded-xs bg-amber-500 shrink-0" />
+                  <span className="truncate">Syndicate</span>
+                  <span className="tabular-nums font-bold ml-auto">{factions.syndicate.influence}%</span>
+                </div>
+                <div className="flex items-center gap-1 truncate text-blue-400">
+                  <span className="w-2 h-2 rounded-xs bg-blue-500 shrink-0" />
+                  <span className="truncate">Wardens</span>
+                  <span className="tabular-nums font-bold ml-auto">{factions.wardens.influence}%</span>
+                </div>
+                <div className="flex items-center gap-1 truncate text-pink-400">
+                  <span className="w-2 h-2 rounded-xs bg-pink-500 shrink-0" />
+                  <span className="truncate">Glitch</span>
+                  <span className="tabular-nums font-bold ml-auto">{factions.glitch_collective.influence}%</span>
+                </div>
+                <div className="flex items-center gap-1 truncate text-emerald-400">
+                  <span className="w-2 h-2 rounded-xs bg-emerald-500 shrink-0" />
+                  <span className="truncate">Drifters</span>
+                  <span className="tabular-nums font-bold ml-auto">{factions.drifters.influence}%</span>
+                </div>
+              </div>
+
+              {/* Multi-segmented influence bar */}
+              <div className="w-full h-1.5 bg-slate-900 border border-slate-800 flex overflow-hidden">
+                <div style={{ width: `${factions.syndicate.influence}%` }} className="bg-amber-500 h-full transition-all duration-300" />
+                <div style={{ width: `${factions.wardens.influence}%` }} className="bg-blue-500 h-full transition-all duration-300" />
+                <div style={{ width: `${factions.glitch_collective.influence}%` }} className="bg-pink-500 h-full transition-all duration-300" />
+                <div style={{ width: `${factions.drifters.influence}%` }} className="bg-emerald-500 h-full transition-all duration-300" />
+              </div>
             </div>
+          )}
+
+          {/* Active Dynamic Skirmish Tracker Widget */}
+          {activeSkirmish && factionAInfo && factionBInfo ? (
+            <div
+              className={`border p-2.5 w-full shadow-xl transition-all ${
+                activeSkirmish.status === 'resolved'
+                  ? 'bg-emerald-950/90 border-emerald-500'
+                  : 'bg-slate-950/95 border-rose-500/80 shadow-rose-950/30'
+              }`}
+            >
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className="text-white font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      activeSkirmish.status === 'resolved' ? 'bg-emerald-400' : 'bg-rose-500 animate-ping'
+                    } inline-block`}
+                  />
+                  {activeSkirmish.status === 'resolved' ? 'SKIRMISH CONCLUDED' : 'DYNAMIC SKIRMISH'} // {activeSkirmish.locationName.toUpperCase()}
+                </span>
+                <span className="text-slate-300 text-[10px] tabular-nums font-mono">
+                  {skirmishDist}m · {skirmishBearing} · {activeSkirmish.status === 'resolved' ? 'RESOLVED' : `${Math.round(activeSkirmish.timeRemaining)}s`}
+                </span>
+              </div>
+
+              {/* Faction Tug of war */}
+              <div className="flex items-center justify-between text-[10px] mb-1 font-bold">
+                <span style={{ color: factionAInfo.colorCss }} className="flex items-center gap-1">
+                  {factionAInfo.name.toUpperCase()} [{activeSkirmish.scoreA}]
+                </span>
+                <span className="text-amber-400 bg-amber-950/70 border border-amber-600/60 px-1.5 py-0.2 rounded-xs text-[9px]">
+                  BOUNTY: +{activeSkirmish.bountyShards} SHARDS
+                </span>
+                <span style={{ color: factionBInfo.colorCss }} className="flex items-center gap-1">
+                  [{activeSkirmish.scoreB}] {factionBInfo.name.toUpperCase()}
+                </span>
+              </div>
+
+              {/* Tug-of-war bar */}
+              <div className="w-full h-2 bg-slate-900 border border-slate-800 flex overflow-hidden">
+                <div
+                  style={{
+                    width: `${Math.min(50, (activeSkirmish.scoreA / activeSkirmish.targetScore) * 50)}%`,
+                    backgroundColor: factionAInfo.colorCss,
+                  }}
+                  className="h-full transition-all duration-150"
+                />
+                <div className="flex-1 bg-slate-950/60" />
+                <div
+                  style={{
+                    width: `${Math.min(50, (activeSkirmish.scoreB / activeSkirmish.targetScore) * 50)}%`,
+                    backgroundColor: factionBInfo.colorCss,
+                  }}
+                  className="h-full transition-all duration-150 ml-auto"
+                />
+              </div>
+
+              {/* Player Support Indicator */}
+              <div className="flex items-center justify-between text-[9px] text-slate-300 mt-1.5">
+                <span>Engage opposing faction units to shift influence</span>
+                {totalPlayerContribution > 0 ? (
+                  <span className="text-emerald-400 font-bold">
+                    YOUR IMPACT: +{totalPlayerContribution} PTS{' '}
+                    {activeSkirmish.playerContributionA > activeSkirmish.playerContributionB
+                      ? `(${factionAInfo.name})`
+                      : `(${factionBInfo.name})`}
+                  </span>
+                ) : (
+                  <span className="text-slate-500">NO INTERVENTION DETECTED</span>
+                )}
+              </div>
+            </div>
+          ) : (
+            cityEvents.length > 0 && (
+              <div className="bg-slate-950/90 border border-slate-800 px-4 py-1.5 flex items-center gap-3 text-xs w-full justify-center shadow-lg">
+                <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest">SECTOR FEED //</span>
+                <span className="text-slate-200 truncate">{cityEvents[0].text}</span>
+              </div>
+            )
           )}
 
           {/* Overhead Speech Bubbles */}
           {speakingCitizens.length > 0 && (
-            <div className="mt-2 flex flex-col gap-1 w-full max-w-md items-center animate-fade-in">
+            <div className="flex flex-col gap-1 w-full max-w-md items-center animate-fade-in">
               {speakingCitizens.slice(0, 2).map((u) => (
                 <div
                   key={u.id}

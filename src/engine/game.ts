@@ -14,6 +14,7 @@ import { WeaponSystem } from './weapons.ts';
 import { PlayerController } from './player.ts';
 import { ProjectileManager } from './projectiles.ts';
 import { AIManager, AIUnit } from './ai.ts';
+import { SocialInteractionEngine } from './social.ts';
 import { SkillTreeManager } from './mutations.ts';
 import { GachaManager } from './gacha.ts';
 import { InstabilityDirector } from './instability.ts';
@@ -76,6 +77,10 @@ export class GameEngine {
   // Visual Effect Group
   private vfxGroup: THREE.Group;
   private tradeBeamLines: THREE.Line[] = [];
+  private skirmishVisualObjects: Map<
+    string,
+    { group: THREE.Group; ringA: THREE.Mesh; ringB: THREE.Mesh; beam: THREE.Mesh; beacon: THREE.Mesh }
+  > = new Map();
 
   // Callbacks for UI updates
   public onStateUpdate?: (
@@ -84,7 +89,8 @@ export class GameEngine {
     weapons: WeaponSystem,
     gacha: GachaManager,
     aiUnits: AIUnit[],
-    isPointerLocked: boolean
+    isPointerLocked: boolean,
+    social: SocialInteractionEngine
   ) => void;
   public onOpenTrade?: (unit: AIUnit) => void;
   public onGameOver?: (stats: GameStats, reason: 'elimination' | 'system_wipe') => void;
@@ -405,6 +411,7 @@ export class GameEngine {
     this.projectiles.update(dt, timeDilationFactor);
     this.city.update(dt);
     this.updateTradeBeams(dt);
+    this.updateSkirmishVisuals(dt);
 
     const aiImpact = this.ai.update(dt, this.player.position, this.city, this.projectiles, timeDilationFactor, this.camera);
     if (aiImpact.damageDealt > 0) {
@@ -412,7 +419,20 @@ export class GameEngine {
       this.screenShakeIntensity = 0.35;
     }
 
-    // Projectile collisions with player
+    // Process Skirmish Resolutions & Rewards
+    while (this.ai.social.pendingResolutions.length > 0) {
+      const res = this.ai.social.pendingResolutions.shift()!;
+      if (res.playerRewarded) {
+        this.skills.addShards(res.bountyShards);
+        this.stats.evolutionShards += res.bountyShards;
+        this.player.addStylePoints(500);
+        sound.playMutationChime();
+        this.addFloatingText(`+${res.bountyShards} SHARDS BOUNTY CLAIMED!`, this.player.position, '#10b981');
+      }
+      this.addCityEvent(res.message, 'combat');
+    }
+
+    // Projectile collisions with player and opposing faction NPCs
     for (let i = this.projectiles.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles.projectiles[i];
       if (!p.isPlayerOwned) {
@@ -421,6 +441,25 @@ export class GameEngine {
           this.spawnParticleBurst(p.position, 0xef4444, 8);
           this.projectiles.destroyProjectile(i);
           this.screenShakeIntensity = 0.25;
+          continue;
+        }
+
+        // Projectile collisions against enemy faction NPCs during skirmishes
+        for (const targetUnit of this.ai.units) {
+          if (p.position.distanceTo(targetUnit.position) < 1.6) {
+            const dmgResult = this.ai.damageCitizen(
+              targetUnit,
+              p.damage,
+              p.velocity.clone().normalize().multiplyScalar(4),
+              'syndicate' /* active hostile combatant faction */
+            );
+            this.spawnParticleBurst(targetUnit.position, this.ai.social.factions[targetUnit.faction].colorHex, 6);
+            this.projectiles.destroyProjectile(i);
+            if (dmgResult.killed) {
+              this.addCityEvent(`${targetUnit.name} fallen in faction skirmish!`, 'combat');
+            }
+            break;
+          }
         }
       }
     }
@@ -477,7 +516,8 @@ export class GameEngine {
         this.weapons,
         this.gacha,
         this.ai.units,
-        this.input.isPointerLocked
+        this.input.isPointerLocked,
+        this.ai.social
       );
     }
   }
@@ -923,6 +963,93 @@ export class GameEngine {
       // Spawn mid-point data sparkle
       const mid = p1.clone().add(p2).multiplyScalar(0.5);
       this.spawnParticleBurst(mid, 0xf59e0b, 2);
+    }
+  }
+
+  private updateSkirmishVisuals(dt: number): void {
+    const activeIds = new Set(this.ai.social.activeSkirmishes.map((s) => s.id));
+
+    // Remove stale skirmish visual objects
+    for (const [id, visual] of this.skirmishVisualObjects.entries()) {
+      if (!activeIds.has(id)) {
+        this.vfxGroup.remove(visual.group);
+        visual.ringA.geometry.dispose();
+        (visual.ringA.material as THREE.Material).dispose();
+        visual.ringB.geometry.dispose();
+        (visual.ringB.material as THREE.Material).dispose();
+        visual.beam.geometry.dispose();
+        (visual.beam.material as THREE.Material).dispose();
+        visual.beacon.geometry.dispose();
+        (visual.beacon.material as THREE.Material).dispose();
+        this.skirmishVisualObjects.delete(id);
+      }
+    }
+
+    // Create / Update active skirmish visual markers
+    for (const sk of this.ai.social.activeSkirmishes) {
+      let visual = this.skirmishVisualObjects.get(sk.id);
+      if (!visual) {
+        const group = new THREE.Group();
+        group.position.set(...sk.position);
+
+        const colA = this.ai.social.factions[sk.factionA].colorHex;
+        const colB = this.ai.social.factions[sk.factionB].colorHex;
+
+        // Outer Ring for Faction A
+        const ringAGeo = new THREE.TorusGeometry(sk.radius, 0.28, 8, 36);
+        const ringAMat = new THREE.MeshBasicMaterial({ color: colA, transparent: true, opacity: 0.65 });
+        const ringA = new THREE.Mesh(ringAGeo, ringAMat);
+        ringA.rotation.x = Math.PI / 2;
+        ringA.position.y = 0.2;
+        group.add(ringA);
+
+        // Inner Ring for Faction B
+        const ringBGeo = new THREE.TorusGeometry(sk.radius * 0.92, 0.22, 8, 36);
+        const ringBMat = new THREE.MeshBasicMaterial({ color: colB, transparent: true, opacity: 0.65 });
+        const ringB = new THREE.Mesh(ringBGeo, ringBMat);
+        ringB.rotation.x = Math.PI / 2;
+        ringB.position.y = 0.25;
+        group.add(ringB);
+
+        // High Altitude Sky Beacon Pillar
+        const beamGeo = new THREE.CylinderGeometry(0.7, 3.2, 50, 16, 1, true);
+        const beamMat = new THREE.MeshBasicMaterial({
+          color: colA,
+          transparent: true,
+          opacity: 0.3,
+          side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending,
+        });
+        const beam = new THREE.Mesh(beamGeo, beamMat);
+        beam.position.y = 25;
+        group.add(beam);
+
+        // Rotating Aerial War Beacon Octahedron
+        const beaconGeo = new THREE.OctahedronGeometry(1.6, 0);
+        const beaconMat = new THREE.MeshStandardMaterial({
+          color: colB,
+          emissive: colA,
+          emissiveIntensity: 0.8,
+          wireframe: true,
+        });
+        const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+        beacon.position.y = 18;
+        group.add(beacon);
+
+        this.vfxGroup.add(group);
+        visual = { group, ringA, ringB, beam, beacon };
+        this.skirmishVisualObjects.set(sk.id, visual);
+      }
+
+      // Animate visual markers
+      visual.ringA.rotation.z += dt * 0.8;
+      visual.ringB.rotation.z -= dt * 0.6;
+      visual.beacon.rotation.y += dt * 2.2;
+      visual.beacon.rotation.x += dt * 1.4;
+
+      const pulse = 1 + Math.sin(Date.now() * 0.006) * 0.04;
+      visual.ringA.scale.set(pulse, pulse, pulse);
+      visual.beacon.position.y = 18 + Math.sin(Date.now() * 0.003) * 1.5;
     }
   }
 
