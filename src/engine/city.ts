@@ -54,6 +54,11 @@ export class CityManager {
     flickerTimer: number;
   }[] = [];
 
+  // Rain System
+  public rainGroup: THREE.Group;
+  private rainPositions!: Float32Array;
+  private readonly RAIN_COUNT = 800;
+
   // Cached Textures
   private cyanTowerTexture: THREE.CanvasTexture;
   private amberTowerTexture: THREE.CanvasTexture;
@@ -65,6 +70,8 @@ export class CityManager {
     this.group = new THREE.Group();
     this.steamGroup = new THREE.Group();
     this.group.add(this.steamGroup);
+    this.rainGroup = new THREE.Group();
+    this.initRain();
 
     // Generate Procedural Textures
     this.cyanTowerTexture = this.createCyberFacadeTexture('#06b6d4', '#e0f2fe', '#0c4a6e');
@@ -335,6 +342,30 @@ export class CityManager {
 
     // 10. Rooftop Industrial Props & Steam Vents
     this.createRooftopProps();
+
+    // 11. Mid-tier filler buildings (AAA density pass)
+    this.createSkyscraper(24, 0, -70, 18, 24, 18, this.amberTowerTexture, 0xf59e0b);
+    this.createSkyscraper(-24, 0, -70, 20, 20, 20, this.purpleTowerTexture, 0x8b5cf6);
+    this.createSkyscraper(24, 0, 70, 18, 22, 18, this.cyanTowerTexture, 0x06b6d4);
+    this.createSkyscraper(-24, 0, 70, 20, 26, 20, this.amberTowerTexture, 0xf59e0b);
+
+    // 12. Cross-district catwalks (upper tier traversal)
+    this.createCatwalk(24, 24.2, -60, 6, 0.5, 18);
+    this.createCatwalk(-24, 24.2, -60, 6, 0.5, 18);
+    this.createCatwalk(24, 22.2, 60, 6, 0.5, 18);
+    this.createCatwalk(-24, 22.2, 60, 6, 0.5, 18);
+
+    // 13. Extra kinetic jump pads for AAA traversal flow
+    this.createJumpPad(24, 24.3, -70);
+    this.createJumpPad(-24, 20.3, 70);
+    this.createJumpPad(0, 20.3, -70);
+
+    // 14. Neon district signs
+    this.addNeonSign(0,  26, -26, '// BLACKFREE //', 0x06b6d4, 0);
+    this.addNeonSign(26, 22, 0,   'AXIOM SECTOR',    0xf59e0b, -Math.PI / 2);
+    this.addNeonSign(-26, 22, 0,  'VECTOR CORE',     0x8b5cf6,  Math.PI / 2);
+    this.addNeonSign(0,  26,  26, 'DANGER ZONE',     0xec4899, Math.PI);
+    this.addNeonSign(0,  42, -50, 'CHRONO SPIRE',    0x7dd3fc, 0);
   }
 
   private createSkyscraper(
@@ -851,5 +882,66 @@ export class CityManager {
       p.mesh.scale.set(s, s, s);
       (p.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - progress) * 0.3;
     }
+
+    // 3. Rain streaks — scroll downward, wrap at bottom
+    if (this.rainPositions) {
+      for (let i = 0; i < this.RAIN_COUNT; i++) {
+        this.rainPositions[i * 3 + 1] -= 28 * dt;
+        if (this.rainPositions[i * 3 + 1] < 0) {
+          this.rainPositions[i * 3 + 1] = 70;
+        }
+      }
+      (this.rainGroup.children[0] as THREE.Points).geometry.attributes['position'].needsUpdate = true;
+    }
+  }
+
+  private initRain(): void {
+    const geo = new THREE.BufferGeometry();
+    this.rainPositions = new Float32Array(this.RAIN_COUNT * 3);
+    for (let i = 0; i < this.RAIN_COUNT; i++) {
+      this.rainPositions[i * 3]     = (Math.random() - 0.5) * 140;
+      this.rainPositions[i * 3 + 1] = Math.random() * 70;
+      this.rainPositions[i * 3 + 2] = (Math.random() - 0.5) * 140;
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(this.rainPositions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0x7dd3fc,
+      size: 0.08,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false,
+    });
+    this.rainGroup.add(new THREE.Points(geo, mat));
+  }
+
+  private addNeonSign(
+    x: number, y: number, z: number,
+    text: string,
+    color: number,
+    rotY: number = 0
+  ): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = 'transparent';
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.font = 'bold 36px monospace';
+    ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+    ctx.textAlign = 'center';
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 18;
+    ctx.fillText(text, 128, 46);
+    const tex = new THREE.CanvasTexture(canvas);
+    const signMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(5, 1.25),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide })
+    );
+    signMesh.position.set(x, y, z);
+    signMesh.rotation.y = rotY;
+    this.group.add(signMesh);
+
+    const light = new THREE.PointLight(color, 1.2, 12);
+    light.position.set(x, y, z);
+    this.group.add(light);
   }
 }

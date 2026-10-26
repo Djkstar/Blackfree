@@ -6,6 +6,11 @@
 
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GameStats, OriginType, WeaponId, FloatingText, CityEvent } from '../types.ts';
 import { sound } from './audio.ts';
 import { InputManager } from './input.ts';
@@ -74,6 +79,12 @@ export class GameEngine {
   // Active decoy holograms (replaces setTimeout)
   private activeDecoys: { mesh: THREE.Mesh; life: number; maxLife: number }[] = [];
 
+  // Post-processing
+  private composer: EffectComposer;
+  private bloomPass: UnrealBloomPass;
+  private chromaticAberrationPass: ShaderPass;
+  private vignettePass: ShaderPass;
+
   // Visual Effect Group
   private vfxGroup: THREE.Group;
   private tradeBeamLines: THREE.Line[] = [];
@@ -121,6 +132,9 @@ export class GameEngine {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     mount.appendChild(this.renderer.domElement);
 
+    // Post-processing pipeline
+    this.composer = new EffectComposer(this.renderer);
+
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x090d16);
     this.scene.fog = new THREE.FogExp2(0x090d16, 0.015);
@@ -157,6 +171,7 @@ export class GameEngine {
     this.scene.add(this.camera);
 
     this.scene.add(this.city.group);
+    this.scene.add(this.city.rainGroup);
     this.scene.add(this.projectiles.group);
     this.scene.add(this.ai.group);
     this.scene.add(this.instability.group);
@@ -177,6 +192,50 @@ export class GameEngine {
     });
     this.particlePoints = new THREE.Points(pGeo, pMat);
     this.scene.add(this.particlePoints);
+
+    // Build post-processing passes (scene/camera now exist)
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(mount.clientWidth, mount.clientHeight),
+      0.85, 0.45, 0.72
+    );
+    this.composer.addPass(this.bloomPass);
+
+    const chromaticAberrationShader = {
+      uniforms: { tDiffuse: { value: null }, uOffset: { value: 0.0 } },
+      vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `
+        uniform sampler2D tDiffuse; uniform float uOffset; varying vec2 vUv;
+        void main() {
+          vec2 dir = vUv - 0.5; float dist = length(dir);
+          vec2 offset = normalize(dir) * uOffset * dist;
+          float r = texture2D(tDiffuse, vUv + offset).r;
+          float g = texture2D(tDiffuse, vUv).g;
+          float b = texture2D(tDiffuse, vUv - offset).b;
+          gl_FragColor = vec4(r, g, b, 1.0);
+        }`,
+    };
+    this.chromaticAberrationPass = new ShaderPass(chromaticAberrationShader);
+    this.chromaticAberrationPass.uniforms['uOffset'].value = 0.004;
+    this.composer.addPass(this.chromaticAberrationPass);
+
+    const vignetteShader = {
+      uniforms: { tDiffuse: { value: null }, uDarkness: { value: 0.6 }, uOffset: { value: 0.55 } },
+      vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `
+        uniform sampler2D tDiffuse; uniform float uDarkness; uniform float uOffset; varying vec2 vUv;
+        void main() {
+          vec4 color = texture2D(tDiffuse, vUv);
+          vec2 uv = vUv * (1.0 - vUv);
+          float vig = uv.x * uv.y * 15.0;
+          vig = pow(vig, uDarkness * uOffset);
+          gl_FragColor = vec4(color.rgb * vig, color.a);
+        }`,
+    };
+    this.vignettePass = new ShaderPass(vignetteShader);
+    this.composer.addPass(this.vignettePass);
+    this.composer.addPass(new OutputPass());
 
     this.stats = {
       kills: 0,
@@ -238,6 +297,7 @@ export class GameEngine {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.composer.setSize(w, h);
   }
 
   private loop(): void {
@@ -253,12 +313,12 @@ export class GameEngine {
 
     if (this.hitstopTimer > 0) {
       this.hitstopTimer -= dt;
-      this.renderer.render(this.scene, this.camera);
+      this.composer.render();
       return;
     }
 
     this.update(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.composer.render();
   }
 
   private update(dt: number): void {
@@ -494,6 +554,16 @@ export class GameEngine {
     } else {
       this.camera.rotation.z = 0;
     }
+
+    // Post-processing pulse: CA spikes on shake, bloom scales with instability
+    this.chromaticAberrationPass.uniforms['uOffset'].value = THREE.MathUtils.damp(
+      this.chromaticAberrationPass.uniforms['uOffset'].value,
+      0.004 + this.screenShakeIntensity * 0.02, 8, dt
+    );
+    this.bloomPass.strength = THREE.MathUtils.damp(
+      this.bloomPass.strength,
+      0.85 + (this.stats.instability / 100) * 0.8, 4, dt
+    );
 
     this.updateParticles(dt);
     this.updateTracers(dt);
