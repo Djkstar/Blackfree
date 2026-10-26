@@ -20,6 +20,7 @@ interface HUDProps {
   gacha: GachaManager;
   aiUnits: AIUnit[];
   playerYaw: number;
+  playerPos?: { x: number; y: number; z: number };
   cityEvents: CityEvent[];
   mutationAlert: MutationAlert | null;
   isPointerLocked: boolean;
@@ -43,6 +44,7 @@ export const HUD: React.FC<HUDProps> = ({
   gacha,
   aiUnits,
   playerYaw,
+  playerPos,
   cityEvents,
   mutationAlert,
   isPointerLocked,
@@ -81,6 +83,16 @@ export const HUD: React.FC<HUDProps> = ({
   };
 
   const speakingCitizens = aiUnits.filter((u) => u.speechText !== null);
+
+  // Proximity interaction calculation
+  const nearestCitizen = playerPos
+    ? aiUnits.find((u) => {
+        const dx = u.position.x - playerPos.x;
+        const dy = u.position.y - playerPos.y;
+        const dz = u.position.z - playerPos.z;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz) < 4.2;
+      })
+    : null;
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none overflow-hidden flex flex-col justify-between p-5 md:p-6 text-white font-mono">
@@ -258,10 +270,15 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
 
         {/* Bottom Center: Camera Aim Status & Interaction Helper */}
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex flex-col items-center gap-1.5">
+          {nearestCitizen && (
+            <div className="bg-emerald-950/95 border border-emerald-400 text-emerald-200 text-xs px-4 py-1.5 shadow-lg shadow-emerald-950/50 animate-bounce font-bold tracking-wider">
+              ⚡ [F] TALK WITH {nearestCitizen.name.toUpperCase()} [{nearestCitizen.occupation.toUpperCase()}]
+            </div>
+          )}
           <button
             onClick={onLockPointer}
-            className={`pointer-events-auto text-[11px] font-mono px-3 py-1 border transition-colors cursor-pointer ${
+            className={`pointer-events-auto text-[11px] font-mono px-3.5 py-1 border transition-colors cursor-pointer ${
               isPointerLocked
                 ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
                 : 'bg-cyan-950/80 border-cyan-400 text-cyan-300 hover:bg-cyan-900 animate-pulse'
@@ -270,7 +287,7 @@ export const HUD: React.FC<HUDProps> = ({
             {isPointerLocked ? '● MOUSE LOOK: LOCKED (ESC TO RELEASE)' : '⚡ CLICK TO LOCK MOUSE AIM (OR DRAG / ARROW KEYS)'}
           </button>
           <span className="text-[10px] text-slate-400 bg-slate-950/70 px-2 py-0.5 border border-slate-800">
-            F to Talk with Citizens · 1-4 Weapons · Space Jump · Shift Slide
+            F to Talk · 1-4 Weapons · Space Jump · Shift Slide
           </span>
         </div>
 

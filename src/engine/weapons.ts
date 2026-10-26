@@ -270,7 +270,8 @@ export class WeaponSystem {
     this.currentWeaponId = id;
     this.isReloading = false;
     this.reloadTimer = 0;
-    this.attackCooldown = 0.2; // brief switch delay
+    this.attackCooldown = 0.18;
+    sound.playWeaponSwitch();
 
     this.weaponMeshes.forEach((mesh, meshId) => {
       mesh.visible = meshId === id;

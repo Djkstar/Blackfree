@@ -46,6 +46,7 @@ export default function App() {
     shield: 100,
     maxShield: 100,
     yaw: 0,
+    pos: { x: 0, y: 22, z: 0 },
   });
 
   const [weaponInfo, setWeaponInfo] = useState({
@@ -81,6 +82,7 @@ export default function App() {
           shield: player.shield,
           maxShield: player.maxShield,
           yaw: player.yaw,
+          pos: { x: player.position.x, y: player.position.y, z: player.position.z },
         });
         setWeaponInfo({
           currentWeaponId: weapons.currentWeaponId,
@@ -265,6 +267,7 @@ export default function App() {
           gacha={engineRef.current.gacha}
           aiUnits={aiUnits}
           playerYaw={playerVitals.yaw}
+          playerPos={playerVitals.pos}
           cityEvents={cityEvents}
           mutationAlert={mutationAlert}
           isPointerLocked={isPointerLocked}

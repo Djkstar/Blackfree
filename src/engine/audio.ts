@@ -414,6 +414,27 @@ class SoundEngine {
     });
   }
 
+  /** Weapon Switch Mechanical Click */
+  public playWeaponSwitch(): void {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(600, now);
+    osc.frequency.exponentialRampToValueAtTime(200, now + 0.05);
+
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(now);
+    osc.stop(now + 0.06);
+  }
+
   /** System Instability / Anomaly siren pulse */
   public playAnomalyWarning(): void {
     if (!this.ctx || !this.sfxGain || this.isMuted) return;
